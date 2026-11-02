@@ -33,8 +33,10 @@ Spells must be memorized to be cast; Auto Combat does not memorize spells for yo
 
 ## Installing
 
-1. Copy the `autocombat` folder into the `scripts` folder of your Hailstone folder, so that you have
-   `scripts/autocombat/init.lua`.
+1. On Hailstone's login screen, click **Add-ons**, paste `https://github.com/projecthailstone/hailstone-autocombat`
+   and press Look, then Install. The card lists what it asks to do; it gets no more than that. Hailstone keeps it up
+   to date. (By hand instead: copy the `autocombat` folder into the `scripts` folder of your Hailstone folder, so that
+   you have `scripts/autocombat/init.lua`.)
 2. In the game, type `/lua run autocombat`. To start it at every login, add it to `hailstone.ini`:
    `scripts.autoload = autocombat`.
 3. Open the window with `/autocombat`, or from the EQ menu: **Plugins > Auto Combat**.
@@ -74,6 +76,18 @@ assist = on
 ```
 
 A mode that is off is greyed out in the window, and Auto Combat pauses if someone switches to it.
+
+## Releasing
+
+```sh
+tools/release.sh 1.0.0             # runs the tests, packs and signs into release/v1.0.0/
+tools/release.sh 1.0.0 --publish   # the same, then a GitHub release of this repository
+```
+
+The script's header lists what it needs: a client checkout with `hailstone_sign` built and the add-on key. Keep
+signing with the same key: a player's client pins the first key it sees and refuses an update signed with another.
+The add-on manager reads releases from public repositories only, so the Add-ons link works once this repository is
+public.
 
 ## Licence
 
