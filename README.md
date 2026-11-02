@@ -75,6 +75,10 @@ assist = on
 
 A mode that is off is greyed out in the window, and Auto Combat pauses if someone switches to it.
 
+## Licence
+
+MIT (see `LICENSE`).
+
 ## Development
 
 The pure parts (settings, conditions, row choice, targeting and the mode logic) are tested with plain Lua 5.4:
