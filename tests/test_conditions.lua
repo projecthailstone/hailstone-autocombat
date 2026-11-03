@@ -28,3 +28,37 @@ case("conditions: numbers, booleans, buffs, missing subjects", function()
   check(conditions.all({}, w), "no conditions")
   eq(conditions.describe({ who = "target", what = "hp", op = "<", value = 50 }), "Target Health % < 50", "described")
 end)
+
+case("conditions: mobs counted within a radius of me or the target", function()
+  -- Three mobs on me, two NPCs about that are not; the target at (100, 0).
+  local a = fake.spawn({ id = 1, x = 100, y = 0 })
+  local b = fake.spawn({ id = 2, x = 110, y = 0 })
+  local c = fake.spawn({ id = 3, x = 10, y = 0 })
+  local idle = fake.spawn({ id = 4, x = 105, y = 5 })
+  local far = fake.spawn({ id = 5, x = 100, y = 0, z = 80 }) -- above the target: out of reach in three dimensions
+  local w = fake.world({ haters = { a, b, c }, target = a, npcs = { a, b, c, idle, far } })
+  local function n(who, what, op, value, radius)
+    return conditions.holds({ who = who, what = what, op = op, value = value, radius = radius }, w)
+  end
+  check(n("target", "near_haters", ">=", 2, 20), "the target and one more on me near it")
+  check(not n("target", "near_haters", ">=", 3, 20), "the third is far from it")
+  check(n("target", "near_npcs", "=", 3, 20), "any NPCs near it: two on me and the idle one")
+  check(n("target", "near_idle", "=", 1, 20), "one near it is not on me")
+  check(not n("target", "near_idle", "<=", 0, 20), "so an AE there would pull it")
+  check(n("me", "near_haters", "=", 1, 30), "one on me near me")
+  check(n("me", "near_idle", "<=", 0, 30), "nothing else near me")
+  check(n("me", "near_haters", ">=", 3, 120), "all three within 120")
+  check(n("me", "near_npcs", "=", 4, 120), "the one above the target is not")
+  -- A dead mob does not count; the radius falls back to the catalog's.
+  a.hp = 0
+  check(n("target", "near_haters", "=", 1, 20), "the dead target left out")
+  check(conditions.holds({ who = "me", what = "near_haters", op = "=", value = 1 }, w), "default radius 30: the one at 10")
+  -- No target, or no NPC list: it never holds.
+  local blind = fake.world({ haters = { c } })
+  check(not conditions.holds({ who = "target", what = "near_haters", op = "<=", value = 5, radius = 30 }, blind), "no target")
+  check(not conditions.holds({ who = "me", what = "near_idle", op = "<=", value = 0, radius = 30 }, blind), "no NPC list")
+  eq(conditions.describe({ who = "target", what = "near_idle", op = "<=", value = 0, radius = 25 }),
+    "NPCs not on me within 25 of the target <= 0", "described")
+  eq(conditions.describe({ who = "me", what = "near_haters", op = ">=", value = 3, radius = 30 }),
+    "Mobs on me within 30 of me >= 3", "described, me")
+end)

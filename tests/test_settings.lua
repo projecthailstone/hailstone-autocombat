@@ -85,3 +85,33 @@ case("settings: Import spell bar makes a row from what each spell is", function(
   eq(petbuff.target, "pet", "pet buff on the pet")
   eq(petbuff.recast, 600, "again once it runs out")
 end)
+
+case("settings: a count keeps its radius, clamped; an AE spell imports with the AE guards", function()
+  local r = settings.row({ name = "Fire Storm", conditions = {
+    { who = "target", what = "near_haters", op = ">=", value = 3, radius = 25 },
+    { who = "me", what = "near_idle", op = "<=", value = 0, radius = 9999 },
+    { who = "me", what = "near_npcs", op = "<=", value = "x" },
+    { who = "me", what = "near_haters", op = "is", value = 1 },  -- not a count's operator: dropped
+  } })
+  eq(#r.conditions, 3, "three kept")
+  eq(r.conditions[1].radius, 25, "radius kept")
+  eq(r.conditions[2].radius, 300, "radius clamped")
+  eq(r.conditions[3].radius, 30, "radius defaulted")
+  eq(r.conditions[3].value, 3, "count defaulted")
+
+  local pb = settings.row_for_spell({ name = "Upheaval", beneficial = false, target_type = "PB AE", ae_range = 35 })
+  eq(pb.target, "enemy", "PB AE on the fight")
+  eq(#pb.conditions, 2, "two guards")
+  eq(pb.conditions[1].who, "me", "centred on me")
+  eq(pb.conditions[1].what, "near_haters", "enough mobs on me")
+  eq(pb.conditions[1].radius, 35, "in its reach")
+  eq(pb.conditions[2].what, "near_idle", "and no adds")
+  eq(pb.conditions[2].op, "<=", "none")
+  local ta = settings.row_for_spell({ name = "Rain of Fire", beneficial = false, target_type = "Targeted AE", ae_range = 0 })
+  eq(ta.conditions[1].who, "target", "centred on the target")
+  eq(ta.conditions[1].radius, 30, "a missing range guessed")
+  local hl = settings.row_for_spell({ name = "Hate Wave", beneficial = false, target_type = "Hatelist" })
+  eq(hl.conditions[1].what, "haters", "a hatelist spell counts the extended target")
+  local nuke = settings.row_for_spell({ name = "Flame Lick", beneficial = false, target_type = "Single" })
+  eq(#nuke.conditions, 0, "a single-target spell gets none")
+end)

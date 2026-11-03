@@ -30,7 +30,19 @@ fires. A row has:
 - **Recast:** seconds to wait before it fires again. Tick **for each target** to count the wait separately for
   each mob (useful for a damage-over-time spell or a debuff).
 - **Conditions:** for example "Me Health % < 50", "Target Health % > 20", "Me lacks Spirit of Wolf",
-  "Target is named", "Mobs on me >= 2". Every condition must hold.
+  "Target is named", "Mobs on me within 30 of the target >= 3". Every condition must hold.
+
+**Counting mobs, for AE spells and abilities.** Six conditions count mobs within a distance you set, of you (for a
+point-blank AE) or of the target (for a targeted AE); the distance is in three dimensions, as the server measures an
+AE's reach, and the spell's AE range is in its Info window:
+
+- *Mobs on me nearby* / *near it*: mobs on your extended target list, the target among them.
+- *NPCs nearby (any)* / *near it*: any live NPC that is not a pet.
+- *NPCs not on me nearby* / *near it*: the ones an AE would pull in; "<= 0" keeps it from making adds.
+
+For example "Mobs on me within 30 of the target >= 3" and "NPCs not on me within 30 of the target <= 0" on Rain of
+Fire. Import spell bar and + Add give an AE spell those two to start with, at its own AE range (a hatelist spell gets
+"Mobs on me >= 3").
 
 Each page shows the rotation as tiles, in the books' look: the spell's or ability's icon, its name, a line with on
 whom, when and its conditions, and a switch to turn the row off without losing it. Drag a tile to move it up or down

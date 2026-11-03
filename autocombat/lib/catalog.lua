@@ -1,6 +1,7 @@
 -- Auto Combat: what a row's conditions can ask, for the evaluator (lib/conditions.lua) and the window's pickers.
 -- A condition is { who = <subject>, what = <property>, op = <operator>, value = <number | text> }; every condition of
--- a row must hold. Pure data: no game calls here.
+-- a row must hold. A count also has `radius`: the mobs counted are within that distance of the subject (an AE's
+-- reach; the distance is in three dimensions, as the server measures an AE's). Pure data: no game calls here.
 local M = {}
 
 -- The operators by the kind of value a property has.
@@ -9,6 +10,7 @@ M.ops = {
   number = { "<", "<=", ">", ">=", "=", "!=" },
   bool = { "is", "is not" },
   buff = { "has", "lacks" },
+  count = { ">=", ">", "<=", "<", "=" },
 }
 
 -- Subjects, in the order the window lists them.
@@ -27,6 +29,9 @@ M.properties = {
     { id = "mana", label = "Mana %", kind = "pct", default = 30 },
     { id = "endurance", label = "Endurance %", kind = "pct", default = 30 },
     { id = "haters", label = "Mobs on me (extended target)", kind = "number", default = 2 },
+    { id = "near_haters", label = "Mobs on me nearby", kind = "count", default = 3, radius = 30 },
+    { id = "near_npcs", label = "NPCs nearby (any)", kind = "count", default = 3, radius = 30 },
+    { id = "near_idle", label = "NPCs not on me nearby", kind = "count", default = 0, radius = 30 },
     { id = "buff", label = "Buff or song", kind = "buff", default = "" },
     { id = "combat", label = "In combat", kind = "bool" },
     { id = "moving", label = "Moving", kind = "bool" },
@@ -34,6 +39,9 @@ M.properties = {
   target = {
     { id = "hp", label = "Health %", kind = "pct", default = 90 },
     { id = "distance", label = "Distance", kind = "number", default = 50 },
+    { id = "near_haters", label = "Mobs on me near it", kind = "count", default = 3, radius = 30 },
+    { id = "near_npcs", label = "NPCs near it (any)", kind = "count", default = 3, radius = 30 },
+    { id = "near_idle", label = "NPCs not on me near it", kind = "count", default = 0, radius = 30 },
     { id = "level", label = "Level", kind = "number", default = 1 },
     { id = "named", label = "Named", kind = "bool" },
     { id = "buff", label = "Buff (anyone's)", kind = "buff", default = "" },
@@ -101,7 +109,13 @@ end
 function M.new_condition(who)
   who = M.properties[who] and who or "me"
   local p = M.properties[who][1]
-  return { who = who, what = p.id, op = M.ops[p.kind][1], value = p.default }
+  return M.condition_for(who, p)
+end
+
+-- A new condition on this property, with its defaults.
+function M.condition_for(who, p)
+  return { who = who, what = p.id, op = p.kind == "count" and (p.default == 0 and "<=" or ">=") or M.ops[p.kind][1],
+    value = p.default, radius = p.radius }
 end
 
 return M

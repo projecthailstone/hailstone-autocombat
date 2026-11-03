@@ -209,6 +209,23 @@ function M.read(settings, allowed)
     total = tonumber(nav.TilesTotal()) or 0,
   }
 
+  -- The live NPCs within 400 of me, not pets, for the count conditions (read once a tick, when asked).
+  local npcs
+  function w.npcs()
+    if not npcs then
+      npcs = {}
+      local list = mq.getFilteredSpawns(function(s)
+        return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and (tonumber(s.Distance3D()) or 9999) <= 400
+          and not owned(s)
+      end)
+      for _, s in ipairs(list) do
+        npcs[#npcs + 1] = { id = s.ID(), x = tonumber(s.X()) or 0, y = tonumber(s.Y()) or 0, z = tonumber(s.Z()) or 0,
+          hp = tonumber(s.PctHPs()) or 0 }
+      end
+    end
+    return npcs
+  end
+
   -- Hunter: the live NPCs in the zone (not pets), each marked when another player is within the settings' radius.
   function w.hunt_spawns()
     local t = settings.targeting

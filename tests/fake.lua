@@ -18,7 +18,7 @@ end
 
 -- opts: me = {...}, target = spawn, haters = {spawns}, spells = {name = {...}}, ready = {kind:name = true},
 -- spawns = {spawns (by id)}, hunt = {spawns}, paths = {id = length}, pet, group, assist, now, allowed,
--- mesh = {loaded, complete, built, total}
+-- mesh = {loaded, complete, built, total}, npcs = {spawns} (the NPCs about, for the counts)
 function M.world(opts)
   opts = opts or {}
   local me = {
@@ -63,6 +63,7 @@ function M.world(opts)
   end
   function w.path_length(id) return (opts.paths or {})[id] end
   function w.hunt_spawns() return opts.hunt or {} end
+  if opts.npcs then function w.npcs() return opts.npcs end end
   return w
 end
 

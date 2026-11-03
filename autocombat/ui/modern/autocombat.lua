@@ -496,6 +496,13 @@ local function rotation(list, rows, w, h, s)
   ui.EndChild()
 end
 
+-- A new condition on this property, with its defaults (catalog.condition_for, which the window cannot call).
+local function fresh(who, p)
+  local op = cat.ops[p.kind][1]
+  if p.kind == "count" then op = p.default == 0 and "<=" or ">=" end
+  return { who = who, what = p.id, op = op, value = p.default, radius = p.radius }
+end
+
 local function conditionEditor(list, row, rows, s)
   local remove = nil
   local avail = ui.GetContentRegionAvail()
@@ -506,9 +513,7 @@ local function conditionEditor(list, row, rows, s)
     ui.PushID("accond" .. i)
     local who = combo("##who", cat.subjects, c.who, wWho)
     if who and who ~= c.who then
-      row.conditions[i] = { who = who }
-      local p = cat.properties[who][1]
-      row.conditions[i].what, row.conditions[i].op, row.conditions[i].value = p.id, cat.ops[p.kind][1], p.default
+      row.conditions[i] = fresh(who, cat.properties[who][1])
       push(list, rows)
     end
     ui.SameLine(0, gap)
@@ -517,7 +522,8 @@ local function conditionEditor(list, row, rows, s)
     local prop
     for _, p in ipairs(props) do if p.id == (what or c.what) then prop = p end end
     if what and what ~= c.what and prop then
-      c.what, c.op, c.value = what, cat.ops[prop.kind][1], prop.default
+      row.conditions[i] = fresh(c.who, prop)
+      c = row.conditions[i]
       push(list, rows)
     end
     if prop then
@@ -531,6 +537,22 @@ local function conditionEditor(list, row, rows, s)
         ui.SetNextItemWidth(wVal)
         local text, changed = ui.InputTextWithHint("##val", "buff name", c.value or "", 64)
         if changed then c.value = text push(list, rows) end
+      elseif prop.kind == "count" then
+        -- how many, and within what distance of the subject
+        ui.SameLine(0, gap)
+        local v = number("##val", c.value or 0, 40 * s, 0, 100)
+        if v then c.value = v push(list, rows) end
+        tip("How many mobs")
+        ui.SameLine(0, gap)
+        local cx, cy = ui.GetCursorPos()
+        ui.SetCursorPos(cx, cy + 3 * s)
+        caption("in")
+        ui.SameLine(0, gap)
+        ui.SetCursorPos(ui.GetCursorPos(), cy)
+        local rad = number("##rad", c.radius or prop.radius or 30, math.max(36 * s, wVal - 40 * s - T.TextSize("in", T.font.small) - 2 * gap), 1, 300)
+        if rad then c.radius = rad push(list, rows) end
+        tip("Within this distance of " .. (c.who == "me" and "you" or "the target")
+          .. " (a spell's AE range is in its Info window)")
       elseif prop.kind ~= "bool" then
         ui.SameLine(0, gap)
         local v = number("##val", c.value or 0, wVal)

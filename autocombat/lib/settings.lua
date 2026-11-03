@@ -111,6 +111,9 @@ function M.condition(c)
   if not p or not catalog.valid_op(p.kind, c.op) then return nil end
   local out = { who = c.who, what = c.what, op = c.op }
   if p.kind == "buff" then out.value = text(c.value, "")
+  elseif p.kind == "count" then
+    out.value = number(c.value, p.default or 0, 0, 100)
+    out.radius = number(c.radius, p.radius or 30, 1, 300)
   elseif p.kind ~= "bool" then out.value = number(c.value, p.default or 0) end
   return out
 end
@@ -146,6 +149,11 @@ end
 --   beneficial on the pet        on my pet, any time, again once it has run out (the recast)
 --   beneficial with a duration   on me, any time, when I lack it
 --   beneficial, instant          on me, any time, when my health is under 60%
+-- The AE target types (the Spell TLO's TargetType), by where the AE is centred.
+M.PB_AE = { ["PB AE"] = true, ["AE Undead"] = true, ["AE Summoned"] = true, ["Caster PB NPC"] = true,
+  ["Directional AE"] = true, ["Beam"] = true }
+M.TARGET_AE = { ["Targeted AE"] = true, ["Targeted AE Tap"] = true, ["Free Target"] = true }
+
 function M.row_for_spell(info)
   local r = { enabled = true, kind = "spell", name = info.name, target = "enemy", phase = "combat", recast = 0,
     per_target = false, conditions = {} }
@@ -160,6 +168,19 @@ function M.row_for_spell(info)
     else
       r.target = "self"
       r.conditions = { { who = "me", what = "hp", op = "<", value = 60 } }
+    end
+  else
+    -- An AE: enough mobs on me in its reach, and none in it that are not (no adds). Hatelist spells hit only the
+    -- mobs on me, wherever they are.
+    local tt = info.target_type or ""
+    local reach = math.floor(tonumber(info.ae_range) or 0)
+    reach = reach > 0 and reach or 30
+    local at = M.PB_AE[tt] and "me" or (M.TARGET_AE[tt] and "target") or nil
+    if at then
+      r.conditions = { { who = at, what = "near_haters", op = ">=", value = 3, radius = reach },
+        { who = at, what = "near_idle", op = "<=", value = 0, radius = reach } }
+    elseif tt == "Hatelist" or tt == "Hatelist2" then
+      r.conditions = { { who = "me", what = "haters", op = ">=", value = 3 } }
     end
   end
   return M.row(r)

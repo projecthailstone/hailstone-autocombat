@@ -154,6 +154,7 @@ local function spell_row(sp, name)
     beneficial = sp.Beneficial() == true,
     target_type = sp.TargetType() or "",
     duration = tonumber(sp.Duration.TotalSeconds()) or 0,
+    ae_range = tonumber(sp.AERange()) or 0,
   })
 end
 
