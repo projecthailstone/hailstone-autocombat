@@ -18,18 +18,19 @@ button, the Burn button, and what Auto Combat is doing, with the last thing it d
 bottom-right corner to scale it. The gear opens the settings window, a page list down the left: Spells, Abilities,
 Targeting, Hunter, Assist, Rest, General and Log.
 
-## The Targets window
+## Force and Ignore on the extended target window
 
-It opens with the compact window (its list button, next to the gear, or `/autocombat targets`): the mobs on your
-extended target list, each with its name in its con colour, its level, distance and health, and what Auto Combat is
-doing with it (FIGHTING, FORCED, IGNORED). Click a mob to target it. Each has two buttons:
+While Auto Combat runs, the Modern UI's extended target window gets two buttons on each mob:
 
 - **Force** (the crosshair): fight this one first, in every mode, until it dies. Click again to let Auto Combat
-  choose. Forcing one you ignored takes the ignore off.
-- **Ignore** (the barred circle): leave this one alone while anything else is on the list. Every ignore ends by
-  itself once no mob you did not ignore is on the list, so a fight never stalls on ignored mobs.
+  choose. A forced mob has a pulsing gold outline and FORCED after its name. Forcing one you ignored takes the
+  ignore off.
+- **Ignore** (the barred circle): leave this one alone while anything else is on the list. An ignored mob is faded,
+  struck through and marked IGNORED. Every ignore ends by itself once no mob you did not ignore is on the list, so a
+  fight never stalls on ignored mobs.
 
-`/autocombat force` and `/autocombat ignore` do the same for your current target.
+`/autocombat force` and `/autocombat ignore` do the same for your current target. The buttons need a Hailstone
+client whose Modern UI has `lib/xtarget.lua`; an older one keeps its plain window, and the commands still work.
 
 ## Burn mode
 
@@ -107,7 +108,6 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 |---|---|
 | `/autocombat` | show or hide the compact window |
 | `/autocombat settings` | show or hide the settings window |
-| `/autocombat targets` | show or hide the Targets window |
 | `/autocombat force`, `ignore` | force or ignore your target (again: undo it) |
 | `/autocombat on`, `off`, `toggle` | start or pause |
 | `/autocombat burn [on\|off]` | burn mode on or off (no word: switch it) |

@@ -15,10 +15,10 @@
 -- Burn mode (the compact window's Burn, /autocombat burn): the rows marked "only during burn" fire only while it is
 -- on; it ends by itself once the extended target list is clear after a fight, or when turned off.
 --
--- The Targets window (the compact window's list button, /autocombat targets): the extended target list, with Force
--- (fight this one first, until it dies) and Ignore (leave it alone while anything else is on the list) on each mob.
+-- The extended target window (the Modern pack's, through its lib/xtarget.lua) gets Force (fight this one first, until
+-- it dies) and Ignore (leave it alone while anything else is on the list) on each mob.
 --
--- /autocombat [show | settings | targets | on | off | toggle | burn [on|off] | force | ignore |
+-- /autocombat [show | settings | on | off | toggle | burn [on|off] | force | ignore |
 --             mode manual|hunter|assist | style full|partial | camp | status]
 -- Settings are kept per server and character in scripts/config/autocombat/. A server may turn modes off in its
 -- hailstone.cfg: [autocombat] manual = off, hunter = off, assist = off.
@@ -39,7 +39,6 @@ local dirty_at = nil                -- when an unsaved change was made
 local loaded_for = nil              -- the settings file loaded ("" before a character is in the world)
 local open = true                   -- the compact window shows (from the start, so /lua run brings it up)
 local settings_open = false         -- the settings window shows
-local targets_open = true           -- the Targets window shows (it opens with the compact window)
 local E = engine.new()
 local held = false                  -- autoskill held
 local row_status = { spells = {}, abilities = {} }
@@ -126,28 +125,16 @@ local function alive(id)
   return sp() ~= nil and sp.Type() ~= "Corpse" and (tonumber(sp.PctHPs()) or 0) > 0
 end
 
--- Every filled slot of the extended target list, for the Targets window; and the ids of its auto haters.
-local function xtargets(full)
+-- Each slot of the extended target list, in order ({ id = 0 } when empty), for the window's buttons; and the ids of
+-- its auto haters.
+local function xtargets()
   local out, haters = {}, {}
   local n = tonumber(hs.player() and hs.player().xtarget_slots) or 0
   for i = 1, n do
     local x = hs.xtarget(i)
-    if x and (x.spawn_id or 0) ~= 0 then
-      if x.type == 1 then haters[#haters + 1] = x.spawn_id end
-      if full then
-        local sp = mq.TLO.Spawn('id ' .. x.spawn_id)
-        if sp() then
-          out[#out + 1] = {
-            id = x.spawn_id, slot = i, hater = x.type == 1,
-            name = sp.CleanName() or x.name or "?",
-            hp = tonumber(sp.PctHPs()) or 0,
-            distance = tonumber(sp.Distance()) or 0,
-            level = tonumber(sp.Level()) or 0,
-            con = ((sp.ConColor() or ""):lower():gsub(" ", "")),
-          }
-        end
-      end
-    end
+    local id = x and x.spawn_id or 0
+    out[i] = { id = id, name = x and x.name or "" }
+    if id ~= 0 and x.type == 1 then haters[#haters + 1] = id end
   end
   return out, haters
 end
@@ -269,7 +256,6 @@ hs.ui_function("state", function()
     settings_open = settings_open,
     running = E.running,
     burn = E.burn,
-    targets_open = targets_open,
     xtargets = xt_list,
     force_id = E.force_id,
     ignored = (function() -- a list of ids: a table keyed by them would not cross to the window
@@ -326,8 +312,6 @@ hs.ui_function("command", function(what, arg)
   elseif what == "settings" then settings_open = not settings_open
   elseif what == "close_settings" then settings_open = false
   elseif what == "burn" then burn()
-  elseif what == "targets" then targets_open = not targets_open
-  elseif what == "close_targets" then targets_open = false
   elseif what == "force" or what == "ignore" then
     local id = tonumber(arg) or 0
     local name
@@ -350,7 +334,6 @@ mq.bind('/autocombat', function(a, b)
   a = (a or ""):lower()
   if a == "" or a == "show" then open = not open
   elseif a == "settings" or a == "setup" then settings_open = not settings_open
-  elseif a == "targets" then targets_open = not targets_open
   elseif a == "force" or a == "ignore" then mark(a)
   elseif a == "on" or a == "start" then start()
   elseif a == "off" or a == "pause" or a == "stop" then pause()
@@ -374,7 +357,7 @@ mq.bind('/autocombat', function(a, b)
     say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "")
       .. (E.burn and ", burning" or "") .. ")")
   else
-    say("/autocombat [show | settings | targets | on | off | toggle | burn [on|off] | force | ignore"
+    say("/autocombat [show | settings | on | off | toggle | burn [on|off] | force | ignore"
       .. " | mode manual|hunter|assist | style full|partial | camp | status]")
   end
 end)
@@ -389,7 +372,7 @@ while true do
     hs.hold_autoskill(want_hold)
     held = want_hold
   end
-  local list, hater_ids = xtargets(targets_open)
+  local list, hater_ids = xtargets()
   xt_list = list
   engine.update_marks(E, hater_ids, alive, act)
   local w = E.running and world_mod.read(S, allowed()) or nil
