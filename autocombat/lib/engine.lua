@@ -18,6 +18,7 @@ local NO_PATH_MS = 20 * 1000  -- a mob with no path while the zone's mesh is sti
 local FACE_MS = 1000          -- how often a fight target is faced when not sticking
 local ASSIST_MS = 1500        -- how often /assist asks again while there is nothing to fight
 local LOOK_MS = 1000          -- hunter: how often it looks for a mob
+local SIT_RETRY_MS = 3000     -- resting: how often /sit is sent again while the player is not sitting yet
 
 function M.new()
   return {
@@ -63,7 +64,7 @@ function M.pause(e, io, why)
   if not e.running then return end
   e.running = false
   stop_moving(e, io)
-  e.fight_id, e.engage_id, e.hunt = 0, 0, nil
+  e.fight_id, e.engage_id, e.hunt, e.look_why = 0, 0, nil, nil
   e.status = "Paused"
   note(e, why or "Paused", io)
   if why then io.say("Auto Combat: " .. why) end
@@ -261,11 +262,14 @@ local function rest(e, world, s, io)
     return false
   end
   if tired then
-    stop_moving(e, io)
-    io.cmd('/sit')
-    e.sat = true
+    -- Not sitting yet: /sit again only now and then (the server may not have answered), and log it once.
+    if not e.sat or world.now - (e.sit_at or -1e9) > SIT_RETRY_MS then
+      stop_moving(e, io)
+      io.cmd('/sit')
+      if not e.sat then note(e, "Resting", io) end
+      e.sat, e.sit_at = true, world.now
+    end
     e.status = "Resting"
-    note(e, "Resting", io)
     return true
   end
   return false
@@ -354,8 +358,8 @@ local function hunt(e, world, s, io)
     return
   end
   if e.nav == "camp" and not world.nav_active then e.nav = nil end
-  -- Look for one (the zone's spawns are read at most once a second).
-  e.status = "Looking for mobs"
+  -- Look for one (the zone's spawns are read at most once a second). Between looks the last look's reason stays.
+  e.status = e.look_why or "Looking for mobs"
   if world.now - (e.last_look or -1e9) < LOOK_MS then return end
   e.last_look = world.now
   for id, until_ms in pairs(e.skip) do
@@ -371,32 +375,43 @@ local function hunt(e, world, s, io)
     wide = true
   end
   local mesh = world.mesh or { loaded = true, complete = true }
-  local no_path = 0
+  local no_path, too_long = 0, 0
   for n = 1, math.min(#list, 5) do
     local m = list[n]
     local len = world.path_length(m.id)
     if len and len >= 0 and (wide or len <= h.max_path) then
       e.hunt = { id = m.id, since = world.now }
+      e.look_why = nil
       note(e, "Hunting " .. (m.name or "?"), io)
       return
     end
-    if not len or len < 0 then no_path = no_path + 1 end
+    if not len or len < 0 then no_path = no_path + 1 else too_long = too_long + 1 end
     -- No path yet while the mesh is still building is not the mob's fault: try it again soon.
     e.skip[m.id] = world.now + ((not len or len < 0) and not mesh.complete and NO_PATH_MS or SKIP_MS)
   end
+  local why
   if #all == 0 then
-    e.status = "No NPCs in the zone"
+    why = "No NPCs in the zone"
   elseif not mesh.loaded then
-    e.status = "No navigation mesh for this zone yet"
+    why = "No navigation mesh for this zone yet"
   elseif no_path > 0 and not mesh.complete then
-    e.status = string.format("Waiting for the navigation mesh (%d/%d)", mesh.built or 0, mesh.total or 0)
+    why = string.format("Waiting for the navigation mesh (%d/%d)", mesh.built or 0, mesh.total or 0)
   elseif #list == 0 and filtered == #all then
-    e.status = string.format("No mobs to hunt: the Targeting page leaves out all %d NPCs", #all)
+    why = string.format("No mobs to hunt: the Targeting page leaves out all %d NPCs", #all)
   elseif #list == 0 then
-    e.status = "No mobs to hunt (the ones left are skipped for now)"
+    why = "No mobs to hunt (the ones left are skipped for now)"
+  elseif no_path > 0 then
+    why = "No path to the nearest mobs"
   else
-    e.status = "Looking for mobs (none reachable yet)"
+    why = "The nearest mobs are past the longest walk"
   end
+  e.status = why
+  -- The log gets the counts once per change of reason, so a hunt that finds nothing can be told apart.
+  if why ~= e.look_why then
+    note(e, string.format("%s (NPCs %d, left out %d, candidates %d%s, no path %d, too far %d)", why, #all, filtered,
+      #list, wide and " zone-wide" or "", no_path, too_long), io)
+  end
+  e.look_why = why
 end
 
 -- ---------------------------------------------------------------- assisting

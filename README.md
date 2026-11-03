@@ -59,7 +59,8 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 | `/autocombat status` | what it is doing |
 
 When Hunter finds nothing, the status line says why: no NPCs, every NPC left out by the Targeting page, or the
-zone's navigation mesh still being built (it waits for it).
+zone's navigation mesh still being built (it waits for it), no path to the nearest mobs, or the nearest mobs past the
+longest walk. The Log page has the counts behind it (NPCs in the zone, left out, candidates, no path, too far).
 
 Your own movement keys stop any walk or `/stick` it started. Auto Combat pauses by itself when you die, when your
 health falls below the mark you set on the Rest page, or when the server does not allow the mode.

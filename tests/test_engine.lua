@@ -77,6 +77,15 @@ case("engine: a fight ends, then it rests and stands up", function()
   check(io.has("/attack off"), "attack off")
   check(io.has("/sit"), "sits for mana")
   eq(e.status, "Resting", "resting")
+  -- Not sitting yet (no answer): no /sit every tick, and one log line.
+  io.clear()
+  engine.tick(e, fake.world({ me = { mana = 20 }, now = 100100 }), s, io)
+  eq(#io.lines, 0, "no /sit again at once")
+  engine.tick(e, fake.world({ me = { mana = 20 }, now = 104000 }), s, io)
+  check(io.has("/sit"), "/sit again later")
+  local n = 0
+  for _, l in ipairs(e.log) do if l == "Resting" then n = n + 1 end end
+  eq(n, 1, "logged once")
   io.clear()
   engine.tick(e, fake.world({ me = { sitting = true, mana = 60 } }), s, io)
   eq(#io.lines, 0, "keeps sitting")
@@ -151,6 +160,10 @@ case("engine: hunter waits for the mesh instead of skipping mobs for long, and s
   engine.tick(e, w, s, io)
   eq(e.hunt, nil, "no path yet")
   eq(e.status, "Waiting for the navigation mesh (3/10)", "status")
+  w.now = w.now + 100
+  engine.tick(e, w, s, io)
+  eq(e.status, "Waiting for the navigation mesh (3/10)", "the reason stays between looks")
+  check(e.last:find("NPCs 1", 1, true), "logged with counts: " .. e.last)
   check(e.skip[60] and e.skip[60] - w.now <= 20000, "tried again soon")
   -- Once the mesh has its path, it goes.
   w.now = w.now + 21000
