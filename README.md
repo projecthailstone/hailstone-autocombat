@@ -39,7 +39,8 @@ Spells must be memorized to be cast; Auto Combat does not memorize spells for yo
    you have `scripts/autocombat/init.lua`.)
 2. In the game, type `/lua run autocombat`. To start it at every login, add it to `hailstone.ini`:
    `scripts.autoload = autocombat`.
-3. Open the window with `/autocombat`, or from the EQ menu: **Plugins > Auto Combat**.
+3. The window opens when the script starts. Hide or show it with `/autocombat`, or from the EQ menu: **Plugins > Auto
+   Combat**.
 
 You need a Hailstone client that has `/stick`, `Me.AbilityReady` and `hailstone.use_ability`. Hunter mode also
 needs the zone's navigation mesh, which Hailstone builds by itself.

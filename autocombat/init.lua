@@ -27,7 +27,7 @@ local S = settings_mod.defaults()   -- the settings in use
 local rev = 1                       -- bumped on every change, so the window knows to read them again
 local dirty_at = nil                -- when an unsaved change was made
 local loaded_for = nil              -- the settings file loaded ("" before a character is in the world)
-local open = false                  -- the window shows
+local open = true                   -- the window shows (from the start, so /lua run brings it up)
 local E = engine.new()
 local held = false                  -- autoskill held
 local row_status = { spells = {}, abilities = {} }
