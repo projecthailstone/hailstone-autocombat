@@ -38,6 +38,8 @@ function M.new()
     last_assist = -1e9,
     burn = false,        -- burn mode: the rows marked "only during burn" may fire (the player turns it on)
     burn_fought = false, -- a mob was on the player since burn mode came on (it ends when they are all gone)
+    force_id = 0,        -- the mob the player forced: fought first, in every mode, until it dies
+    ignore = {},         -- id -> true: mobs the player ignored, until no other mob is on the extended target list
     last = "",           -- the last thing it did, for the window
     log = {},            -- the last few lines
   }
@@ -75,6 +77,58 @@ function M.pause(e, io, why)
   e.status = "Paused"
   note(e, why or "Paused", io)
   if why then io.say("Auto Combat: " .. why) end
+end
+
+-- ---------------------------------------------------------------- the player's marks (the Targets window)
+
+-- Force a mob (again: unforce it): it is fought first, whatever the mode, until it dies. Forcing one ignored
+-- takes the ignore off.
+function M.force(e, id, name, io)
+  id = tonumber(id) or 0
+  if id == 0 then return end
+  if e.force_id == id then
+    e.force_id = 0
+    note(e, "No longer forcing " .. (name or "it"), io)
+    return
+  end
+  e.force_id = id
+  e.ignore[id] = nil
+  note(e, "Forcing " .. (name or "it"), io)
+end
+
+-- Ignore a mob (again: stop ignoring it): it is not fought while another mob is on the extended target list.
+-- Ignoring the forced one takes the force off.
+function M.ignore(e, id, name, io)
+  id = tonumber(id) or 0
+  if id == 0 then return end
+  if e.ignore[id] then
+    e.ignore[id] = nil
+    note(e, "No longer ignoring " .. (name or "it"), io)
+    return
+  end
+  e.ignore[id] = true
+  if e.force_id == id then e.force_id = 0 end
+  note(e, "Ignoring " .. (name or "it"), io)
+end
+
+-- Clears the marks that are over: a force once its mob is dead or gone; an ignore once its mob is, and every ignore
+-- once no mob that is not ignored is on the extended target list. `haters` the ids on the list now; `alive(id)`
+-- whether that mob still lives. Runs while paused too, so the window shows the marks as they are.
+function M.update_marks(e, haters, alive, io)
+  if e.force_id ~= 0 and not alive(e.force_id) then
+    e.force_id = 0
+    note(e, "The forced mob is dead", io)
+  end
+  local any = false
+  for id in pairs(e.ignore) do
+    if not alive(id) then e.ignore[id] = nil else any = true end
+  end
+  if not any then return end
+  for _, id in ipairs(haters) do
+    if not e.ignore[id] then return end
+  end
+  e.ignore = {}
+  note(e, "Nothing else on the extended target list: ignores cleared", io)
 end
 
 -- Burn mode on or off (the player's button or command).
@@ -176,8 +230,15 @@ end
 -- the one Hunter chose to go after; never a target that is merely selected with auto attack on (an animated corpse,
 -- someone's pet), and never someone's pet (lib/world.lua's owned).
 local function fight_target(e, world, s)
+  -- The forced mob first, in every mode, while it lives.
+  if e.force_id ~= 0 then
+    local f = world.spawn(e.force_id)
+    if f and (f.hp or 0) > 0 and not f.owned then return f end
+  end
+  local ignored = e.ignore
   local haters = hater_ids(world)
   local pt = world.target
+  if pt and ignored[pt.id] then pt = nil end
   local player_fights = pt and pt.npc and not pt.owned and (pt.hp or 0) > 0 and (haters[pt.id] or world.me.combat)
   if s.mode == "manual" and s.style == "partial" then
     -- You choose: the NPC you target, once it is on you or you attack it.
@@ -186,7 +247,7 @@ local function fight_target(e, world, s)
   if s.mode == "assist" then
     local a = world.assist
     -- Keep at the one we fight while it lives; else the assist's target (our target after /assist) once low enough.
-    if e.fight_id ~= 0 then
+    if e.fight_id ~= 0 and not ignored[e.fight_id] then
       local f = world.spawn(e.fight_id)
       if f and (f.hp or 0) > 0 then return f end
     end
@@ -199,11 +260,11 @@ local function fight_target(e, world, s)
   -- Full and hunter: the mobs on me, then the one Hunter chose to go after.
   local awake = {}
   for _, x in ipairs(world.haters) do
-    if not x.owned then awake[#awake + 1] = x end
+    if not x.owned and not ignored[x.id] then awake[#awake + 1] = x end
   end
   local h = targeting.choose_hater(awake, e.fight_id, s.targeting.priority)
   if h then return h end
-  if e.engage_id ~= 0 then
+  if e.engage_id ~= 0 and not ignored[e.engage_id] then
     local g = world.spawn(e.engage_id)
     if g and (g.hp or 0) > 0 and not g.owned then return g end
     e.engage_id = 0

@@ -1001,6 +1001,148 @@ local function gearButton(id, x, y, size, s, lit)
   return clicked
 end
 
+-- ---------------------------------------------------------------- the Targets window
+-- The extended target list as Auto Combat sees it: each mob's name in its con colour over its health, what Auto
+-- Combat does with it (fighting, forced, ignored), and the Force and Ignore buttons. A click targets the mob.
+local CON_COLORS = {
+  grey = { 0.62, 0.62, 0.62, 1 }, green = { 0.25, 0.85, 0.35, 1 }, lightblue = { 0.45, 0.85, 1.0, 1 },
+  blue = { 0.35, 0.55, 1.0, 1 }, white = { 0.95, 0.95, 0.95, 1 }, yellow = { 1.0, 0.88, 0.25, 1 },
+  red = { 1.0, 0.35, 0.30, 1 },
+}
+local FORCE = { 1.0, 0.78, 0.25, 1 }
+local XT_ROW = 50
+
+-- A crosshair (force) or a circle with a bar through it (ignore), in a round button. Returns clicked.
+local function markButton(id, kind, x, y, size, s, on, tipText)
+  local clicked = T.Hit(id, x, y, x + size, y + size)
+  local hovered, active = ui.IsItemHovered(), ui.IsItemActive()
+  local col = kind == "force" and FORCE or C.danger
+  local cx, cy, r = x + size / 2, y + size / 2, size / 2
+  if on then
+    ui.DrawCircleFilled(cx, cy, r, col[1], col[2], col[3], active and 0.7 or 0.9)
+  else
+    ui.DrawCircleFilled(cx, cy, r, C.ink[1], C.ink[2], C.ink[3], active and 0.18 or (hovered and 0.12 or 0.06))
+    if hovered then ui.DrawCircle(cx, cy, r - 0.5 * s, col[1], col[2], col[3], 0.8, 1.2 * s) end
+  end
+  local ic = on and { 0.08, 0.08, 0.1, 1 } or (hovered and col or C.muted)
+  local ir = r * 0.48
+  if kind == "force" then
+    ui.DrawCircle(cx, cy, ir, ic[1], ic[2], ic[3], 1, 1.5 * s)
+    for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+      ui.DrawLine(cx + d[1] * ir * 0.45, cy + d[2] * ir * 0.45, cx + d[1] * ir * 1.45, cy + d[2] * ir * 1.45,
+        ic[1], ic[2], ic[3], 1, 1.5 * s)
+    end
+  else
+    ui.DrawCircle(cx, cy, ir, ic[1], ic[2], ic[3], 1, 1.6 * s)
+    ui.DrawLine(cx - ir * 0.7, cy + ir * 0.7, cx + ir * 0.7, cy - ir * 0.7, ic[1], ic[2], ic[3], 1, 1.6 * s)
+  end
+  if hovered then ui.SetTooltip(tipText) end
+  return clicked
+end
+
+local function targetsSize(s)
+  local n = #(st.xtargets or {})
+  return 300, 38 + math.max(n, 1) * (XT_ROW + 4) + 8
+end
+
+local function targetsBody(x, y, w, h, s)
+  local pad = 10 * s
+  T.Text(x + pad, y + 8 * s, "TARGETS", C.muted, T.font.small)
+  local list = st.xtargets or {}
+  local ignore = {}
+  for _, id in ipairs(st.ignored or {}) do ignore[id] = true end
+  local _, th = T.TextSize("Ag", T.font.small)
+  local _, tt = T.TextSize("Ag", T.font.tiny)
+  local yy = y + 32 * s
+  if #list == 0 then
+    T.Text(x + w / 2, yy + (XT_ROW * s - th) / 2, "Nothing on your extended target list", C.faint, T.font.small, "center")
+    return
+  end
+  local now = ui.GetTime()
+  for _, m in ipairs(list) do
+    local x0, x1, y0, y1 = x + pad, x + w - pad, yy, yy + XT_ROW * s
+    local forced, ignored = st.force_id == m.id, ignore[m.id] == true
+    local fighting = st.fight_id == m.id
+    local bsz = 24 * s
+    local fx = x1 - 8 * s - bsz
+    local ix = fx - 6 * s - bsz
+    local by = y0 + (XT_ROW * s - bsz) / 2
+    if T.Hit("##acxt" .. m.id, x0, y0, ix - 4 * s, y1) then P.command("target", m.id) end
+    local hovered = ui.IsItemHovered()
+    if hovered then
+      ui.SetTooltip(m.name .. "\nLevel " .. m.level .. string.format("  \xC2\xB7  %.0f away", m.distance)
+        .. "\nClick: target it" .. (m.hater and "" or "\n(not an auto hater slot)"))
+    end
+    local dim = ignored and 0.45 or 1
+    -- the card
+    ui.DrawRectFilled(x0, y0, x1, y1, C.ink[1], C.ink[2], C.ink[3], hovered and 0.08 or 0.045, 7 * s)
+    if forced then
+      local p = 0.55 + 0.45 * math.sin(now * 5)
+      ui.DrawRect(x0, y0, x1, y1, FORCE[1], FORCE[2], FORCE[3], 0.5 + 0.4 * p, 7 * s, 1.6 * s)
+    elseif fighting then
+      ui.DrawRect(x0, y0, x1, y1, C.accent[1], C.accent[2], C.accent[3], 0.55, 7 * s, 1.2 * s)
+    end
+    if fighting then
+      ui.DrawRectFilled(x0, y0 + 8 * s, x0 + 3 * s, y1 - 8 * s, C.accent[1], C.accent[2], C.accent[3], 1, 2 * s)
+    end
+    -- name in its con colour, level and distance under it, the health bar at the foot
+    local nx = x0 + 10 * s
+    local room = ix - 8 * s - nx
+    local cc = CON_COLORS[m.con] or C.text
+    local name = T.Fit(m.name, room, T.font.small)
+    T.Text(nx, y0 + 6 * s, name, cc, T.font.small, nil, dim)
+    if ignored then
+      local nw = T.TextSize(name, T.font.small)
+      ui.DrawLine(nx, y0 + 6 * s + th / 2, nx + nw, y0 + 6 * s + th / 2, cc[1], cc[2], cc[3], 0.9 * dim, 1.2 * s)
+    end
+    local tag, tagc = nil, nil
+    if forced then tag, tagc = "FORCED", FORCE
+    elseif ignored then tag, tagc = "IGNORED", C.muted
+    elseif fighting then tag, tagc = "FIGHTING", C.accent end
+    local sub = string.format("L%d  \xC2\xB7  %.0f", m.level, m.distance)
+    T.Text(nx, y0 + 9 * s + th, sub, C.faint, T.font.tiny, nil, dim)
+    if tag then
+      local sw = T.TextSize(sub, T.font.tiny)
+      local tw = T.TextSize(tag, T.font.tiny)
+      local px = nx + sw + 8 * s
+      ui.DrawRectFilled(px, y0 + 8 * s + th, px + tw + 10 * s, y0 + 10 * s + th + tt, tagc[1], tagc[2], tagc[3], 0.18,
+        (tt + 2 * s) / 2)
+      T.Text(px + 5 * s, y0 + 9 * s + th, tag, tagc, T.font.tiny)
+    end
+    T.Bar("acxt.hp" .. m.id, nx, y1 - 11 * s, ix - 8 * s, y1 - 6 * s, s, (m.hp or 0) / 100, C.hp, { alpha = dim })
+    T.Text(ix - 10 * s, y0 + 9 * s + th, string.format("%d%%", m.hp), C.muted, T.font.tiny, "right", dim)
+    -- the buttons
+    if markButton("##acig" .. m.id, "ignore", ix, by, bsz, s, ignored, ignored
+          and "Ignored: click to fight it again" or "Ignore: leave it alone while anything else is on the list") then
+      P.command("ignore", m.id)
+    end
+    if markButton("##acfo" .. m.id, "force", fx, by, bsz, s, forced, forced
+          and "Forced: click to let Auto Combat choose again" or "Force: fight this one first, until it dies") then
+      P.command("force", m.id)
+    end
+    yy = y1 + 4 * s
+  end
+end
+
+-- A list button (the Targets window), as the gear. Returns clicked.
+local function listButton(id, x, y, size, s, lit)
+  local clicked = T.Hit(id, x, y, x + size, y + size)
+  local hovered, active = ui.IsItemHovered(), ui.IsItemActive()
+  if hovered or lit then
+    local a = lit and C.accent or C.ink
+    ui.DrawRectFilled(x, y, x + size, y + size, a[1], a[2], a[3], lit and (hovered and 0.35 or 0.25) or (active and 0.16 or 0.10),
+      size / 4)
+  end
+  local c = (hovered or lit) and C.text or C.muted
+  for k = 0, 2 do
+    local ly = y + size * (0.30 + 0.20 * k)
+    ui.DrawCircleFilled(x + size * 0.24, ly, size * 0.06, c[1], c[2], c[3], 1)
+    ui.DrawLine(x + size * 0.38, ly, x + size * 0.80, ly, c[1], c[2], c[3], 1, size * 0.10)
+  end
+  if hovered then ui.SetTooltip("Targets: force or ignore the mobs on your extended target list") end
+  return clicked
+end
+
 local STYLE_TIPS = {
   full = "It targets the mobs on you and keeps you in range",
   partial = "You pick the mob and stand where you want; it only turns you to face it",
@@ -1068,6 +1210,7 @@ local function compact(x, y, w, h, s)
     T.Text(bx + 13 * s, y + 8 * s, "BURNING", BURN, T.font.small, nil, a)
   end
   if gearButton("##acgear", x + w - 44 * s, y + 4 * s, 18 * s, s, st.settings_open) then P.command("settings") end
+  if listButton("##aclist", x + w - 68 * s, y + 4 * s, 18 * s, s, st.targets_open) then P.command("targets") end
 
   -- the mode, and Manual's style
   local off = {}
@@ -1210,7 +1353,7 @@ ui.window("Auto Combat", function()
   P = eq.Plugin("autocombat")
   if not P or not eq.InGame() then return end
   st = P.state() or {}
-  if not st.open and not st.settings_open then return end
+  if not st.open and not st.settings_open and not st.targets_open then return end
   if st.rev ~= rev or not S then
     S = P.settings()
     rev = st.rev
@@ -1223,6 +1366,12 @@ ui.window("Auto Combat", function()
     place = function(W, H, w, h) return W - w - 40, H * 0.30 end,
     onClose = function() P.command("close") end,
   }, compact)
+  hud.Window(nil, "Auto Combat Targets", {
+    shown = function() return st.targets_open end,
+    size = targetsSize,
+    place = function(W, H, w, h) return W - w - 40, H * 0.30 + 190 end,
+    onClose = function() P.command("close_targets") end,
+  }, targetsBody)
   hud.Dialog(SETTINGS_KEY, "Auto Combat Settings", {
     shown = st.settings_open == true,
     keepTitle = true,

@@ -286,3 +286,68 @@ case("engine: burn mode ends once the extended target list is clear after a figh
   engine.pause(e, io)
   check(e.burn, "pause keeps burn mode")
 end)
+
+case("engine: a forced mob is fought first in every mode until it dies; an ignored one is left alone", function()
+  local a = fake.spawn({ id = 9, name = "a gnoll", hp = 30 })
+  local b = fake.spawn({ id = 10, name = "a gnoll pup", hp = 90 })
+  local c = fake.spawn({ id = 11, name = "a gnoll scout", hp = 60 })
+  local s, e, io = setup({ targeting = { priority = "lowest_hp" } })
+  engine.tick(e, fake.world({ haters = { a, b, c } }), s, io)
+  check(io.has("/target id 9"), "lowest health first")
+  -- Force the healthiest one: it is fought now.
+  io.clear()
+  engine.force(e, 10, "a gnoll pup", io)
+  engine.tick(e, fake.world({ haters = { a, b, c }, target = a }), s, io)
+  check(io.has("/target id 10"), "the forced one")
+  -- Ignore it instead: the force goes; ignore the next best too: the third.
+  io.clear()
+  engine.ignore(e, 10, "a gnoll pup", io)
+  eq(e.force_id, 0, "ignoring the forced one unforces it")
+  engine.ignore(e, 9, "a gnoll", io)
+  engine.tick(e, fake.world({ haters = { a, b, c }, target = b }), s, io)
+  check(io.has("/target id 11"), "the one not ignored")
+  -- Forcing an ignored mob takes the ignore off.
+  engine.force(e, 9, "a gnoll", io)
+  check(not e.ignore[9], "unignored by force")
+  engine.force(e, 9, "a gnoll", io)
+  eq(e.force_id, 0, "force again: unforced")
+
+  -- Assist and Partial: the force wins over the assist's or the player's pick.
+  for _, mode in ipairs({ { mode = "assist" }, { mode = "manual", style = "partial" } }) do
+    local s2, e2, io2 = setup(mode)
+    engine.force(e2, 11, "a gnoll scout", io2)
+    engine.tick(e2, fake.world({ haters = { a, b, c }, target = a, assist = fake.spawn({ id = 70, pc = true, npc = false }),
+      me = { combat = true } }), s2, io2)
+    check(io2.has("/target id 11"), mode.mode .. ": the forced one")
+  end
+  -- Partial: an ignored target is not fought even when the player attacks it.
+  local s3, e3, io3 = setup({ mode = "manual", style = "partial" })
+  engine.ignore(e3, 9, "a gnoll", io3)
+  engine.tick(e3, fake.world({ haters = { a }, target = a, me = { combat = true } }), s3, io3)
+  eq(e3.fight_id, 0, "partial leaves the ignored target alone")
+end)
+
+case("engine: a force ends when its mob dies; ignores end when nothing else is on the list", function()
+  local e = engine.new()
+  local io = fake.io()
+  local living = { [9] = true, [10] = true, [11] = true }
+  local function alive(id) return living[id] == true end
+  engine.force(e, 9, "a gnoll", io)
+  engine.ignore(e, 10, "a pup", io)
+  engine.update_marks(e, { 9, 10, 11 }, alive, io)
+  eq(e.force_id, 9, "kept while it lives")
+  living[9] = nil
+  engine.update_marks(e, { 10, 11 }, alive, io)
+  eq(e.force_id, 0, "dead: the force is over")
+  check(e.ignore[10], "the ignore stays while 11 is on the list")
+  engine.update_marks(e, { 10 }, alive, io)
+  check(not e.ignore[10], "only the ignored one left: ignores cleared")
+  -- An ignored mob that dies is forgotten; one off the list is kept while others are on it.
+  engine.ignore(e, 10, "a pup", io)
+  engine.ignore(e, 11, "a scout", io)
+  living[11] = nil
+  engine.update_marks(e, { 10, 12 }, function(id) return id == 10 or id == 12 end, io)
+  check(e.ignore[10] and not e.ignore[11], "the dead one forgotten")
+  engine.update_marks(e, {}, function() return true end, io)
+  check(not e.ignore[10], "an empty list clears them")
+end)

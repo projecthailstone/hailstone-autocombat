@@ -15,8 +15,11 @@
 -- Burn mode (the compact window's Burn, /autocombat burn): the rows marked "only during burn" fire only while it is
 -- on; it ends by itself once the extended target list is clear after a fight, or when turned off.
 --
--- /autocombat [show | settings | on | off | toggle | burn [on|off] | mode manual|hunter|assist | style full|partial |
---             camp | status]
+-- The Targets window (the compact window's list button, /autocombat targets): the extended target list, with Force
+-- (fight this one first, until it dies) and Ignore (leave it alone while anything else is on the list) on each mob.
+--
+-- /autocombat [show | settings | targets | on | off | toggle | burn [on|off] | force | ignore |
+--             mode manual|hunter|assist | style full|partial | camp | status]
 -- Settings are kept per server and character in scripts/config/autocombat/. A server may turn modes off in its
 -- hailstone.cfg: [autocombat] manual = off, hunter = off, assist = off.
 local mq = require('mq')
@@ -36,6 +39,7 @@ local dirty_at = nil                -- when an unsaved change was made
 local loaded_for = nil              -- the settings file loaded ("" before a character is in the world)
 local open = true                   -- the compact window shows (from the start, so /lua run brings it up)
 local settings_open = false         -- the settings window shows
+local targets_open = true           -- the Targets window shows (it opens with the compact window)
 local E = engine.new()
 local held = false                  -- autoskill held
 local row_status = { spells = {}, abilities = {} }
@@ -113,6 +117,51 @@ end
 local function pause(why)
   if E.running then engine.pause(E, act, why) end
   if not why then say("paused.") end
+end
+
+-- ---------------------------------------------------------------- the extended target list and the marks
+
+local function alive(id)
+  local sp = mq.TLO.Spawn('id ' .. id)
+  return sp() ~= nil and sp.Type() ~= "Corpse" and (tonumber(sp.PctHPs()) or 0) > 0
+end
+
+-- Every filled slot of the extended target list, for the Targets window; and the ids of its auto haters.
+local function xtargets(full)
+  local out, haters = {}, {}
+  local n = tonumber(hs.player() and hs.player().xtarget_slots) or 0
+  for i = 1, n do
+    local x = hs.xtarget(i)
+    if x and (x.spawn_id or 0) ~= 0 then
+      if x.type == 1 then haters[#haters + 1] = x.spawn_id end
+      if full then
+        local sp = mq.TLO.Spawn('id ' .. x.spawn_id)
+        if sp() then
+          out[#out + 1] = {
+            id = x.spawn_id, slot = i, hater = x.type == 1,
+            name = sp.CleanName() or x.name or "?",
+            hp = tonumber(sp.PctHPs()) or 0,
+            distance = tonumber(sp.Distance()) or 0,
+            level = tonumber(sp.Level()) or 0,
+            con = ((sp.ConColor() or ""):lower():gsub(" ", "")),
+          }
+        end
+      end
+    end
+  end
+  return out, haters
+end
+
+local xt_list = {}
+
+local function mark(kind, id, name)
+  if not id or id == 0 then
+    local t = mq.TLO.Target
+    id, name = tonumber(t.ID()) or 0, t.CleanName()
+    if id == 0 then return say("target a mob first.") end
+  end
+  if kind == "force" then engine.force(E, id, name, act) else engine.ignore(E, id, name, act) end
+  say(E.last .. ".")
 end
 
 local function burn(on)
@@ -220,6 +269,15 @@ hs.ui_function("state", function()
     settings_open = settings_open,
     running = E.running,
     burn = E.burn,
+    targets_open = targets_open,
+    xtargets = xt_list,
+    force_id = E.force_id,
+    ignored = (function() -- a list of ids: a table keyed by them would not cross to the window
+      local out = {}
+      for id in pairs(E.ignore) do out[#out + 1] = id end
+      return out
+    end)(),
+    fight_id = E.running and E.fight_id or 0,
     mode = S.mode,
     style = S.style,
     status = E.running and E.status or "Paused",
@@ -260,7 +318,7 @@ hs.ui_function("set_ignore", function(list)
   changed()
   return true
 end)
-hs.ui_function("command", function(what)
+hs.ui_function("command", function(what, arg)
   if what == "start" then start()
   elseif what == "pause" then pause()
   elseif what == "toggle" then if E.running then pause() else start() end
@@ -268,6 +326,15 @@ hs.ui_function("command", function(what)
   elseif what == "settings" then settings_open = not settings_open
   elseif what == "close_settings" then settings_open = false
   elseif what == "burn" then burn()
+  elseif what == "targets" then targets_open = not targets_open
+  elseif what == "close_targets" then targets_open = false
+  elseif what == "force" or what == "ignore" then
+    local id = tonumber(arg) or 0
+    local name
+    for _, x in ipairs(xt_list) do if x.id == id then name = x.name end end
+    if id ~= 0 then mark(what, id, name) end
+  elseif what == "target" then
+    if (tonumber(arg) or 0) ~= 0 then mq.cmd('/target id ' .. math.floor(tonumber(arg))) end
   elseif what == "camp" then set_camp()
   elseif what == "clear_camp" then S.hunter.camp = nil changed()
   elseif what == "import_autoskill" then return import_autoskill()
@@ -283,6 +350,8 @@ mq.bind('/autocombat', function(a, b)
   a = (a or ""):lower()
   if a == "" or a == "show" then open = not open
   elseif a == "settings" or a == "setup" then settings_open = not settings_open
+  elseif a == "targets" then targets_open = not targets_open
+  elseif a == "force" or a == "ignore" then mark(a)
   elseif a == "on" or a == "start" then start()
   elseif a == "off" or a == "pause" or a == "stop" then pause()
   elseif a == "toggle" then if E.running then pause() else start() end
@@ -305,8 +374,8 @@ mq.bind('/autocombat', function(a, b)
     say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "")
       .. (E.burn and ", burning" or "") .. ")")
   else
-    say("/autocombat [show | settings | on | off | toggle | burn [on|off] | mode manual|hunter|assist | style full|partial"
-      .. " | camp | status]")
+    say("/autocombat [show | settings | targets | on | off | toggle | burn [on|off] | force | ignore"
+      .. " | mode manual|hunter|assist | style full|partial | camp | status]")
   end
 end)
 
@@ -320,6 +389,9 @@ while true do
     hs.hold_autoskill(want_hold)
     held = want_hold
   end
+  local list, hater_ids = xtargets(targets_open)
+  xt_list = list
+  engine.update_marks(E, hater_ids, alive, act)
   local w = E.running and world_mod.read(S, allowed()) or nil
   if E.burn and engine.burn_tick(E, w and #w.haters or world_mod.hater_count(), act) then
     say("burn over: the extended target list is clear.")
