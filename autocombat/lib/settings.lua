@@ -139,6 +139,32 @@ function M.row(r)
 end
 
 -- A loaded (or edited) settings table made whole: defaults for what is missing or wrong.
+-- A Spells row for a memorized spell (Import spell bar), from what the spell is: info = { name, beneficial,
+-- target_type (MQ's TargetType: "Self", "Single", "Pet" ...), duration (seconds, 0: none) }. A starting point the
+-- player edits:
+--   detrimental                  on the fight target, in combat
+--   beneficial on the pet        on my pet, any time, again once it has run out (the recast)
+--   beneficial with a duration   on me, any time, when I lack it
+--   beneficial, instant          on me, any time, when my health is under 60%
+function M.row_for_spell(info)
+  local r = { enabled = true, kind = "spell", name = info.name, target = "enemy", phase = "combat", recast = 0,
+    per_target = false, conditions = {} }
+  if info.beneficial then
+    r.phase = "always"
+    if info.target_type == "Pet" then
+      r.target = "pet"
+      r.recast = math.max(0, math.min(3600, info.duration or 0))
+    elseif (info.duration or 0) > 0 then
+      r.target = "self"
+      r.conditions = { { who = "me", what = "buff", op = "lacks", value = info.name } }
+    else
+      r.target = "self"
+      r.conditions = { { who = "me", what = "hp", op = "<", value = 60 } }
+    end
+  end
+  return M.row(r)
+end
+
 function M.repair(given)
   local d = M.defaults()
   local out = fill(d, given)

@@ -12,6 +12,16 @@ local CONS = { GREY = "grey", GREEN = "green", ["LIGHT BLUE"] = "lightblue", BLU
 
 local function pct(v) return tonumber(v) or 100 end
 
+-- Someone's pet, a swarm pet among them. A swarm pet (an animated corpse, a necromancer's skeletons, a wizard's
+-- familiar burst ...) comes with no owner in its spawn record on stock EQEmu (NPC::PetOnSpawn); what marks it is the
+-- surname "<owner>'s Pet" (the rule Pets:ClientPetsUseOwnerNameInLastName, on by default). A server with that rule
+-- off sends nothing to tell it by, so a swarm pet there looks like any NPC.
+local function owned(sp)
+  if sp.Type() == "Pet" then return true end -- one with an owner in its record
+  local surname = (sp.Surname() or ""):lower()
+  return surname:find("['`]s pet$") ~= nil
+end
+
 -- A spawn (an MQ spawn value, already known to exist) as a table.
 local function spawn_table(sp)
   local populated = sp.BuffsPopulated() == true
@@ -29,6 +39,7 @@ local function spawn_table(sp)
     max_range = tonumber(sp.MaxRangeTo()) or 14,
     buffs_known = populated,
   }
+  t.owned = owned(sp)
   t.los = sp.LineOfSight()
   -- What a buff tells: only when the server sent this spawn's buffs (Target.BuffsPopulated); unknown (nil) else.
   if populated then
@@ -203,7 +214,7 @@ function M.read(settings, allowed)
     end
     local out = {}
     local list = mq.getFilteredSpawns(function(s)
-      return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and s.Targetable() ~= false
+      return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and s.Targetable() ~= false and not owned(s)
     end)
     for _, s in ipairs(list) do
       local x = spawn_table(s)

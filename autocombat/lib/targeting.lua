@@ -6,6 +6,7 @@ local function lower(s) return (s or ""):lower() end
 
 -- Whether the targeting settings let this mob be chosen.
 function M.allowed(spawn, t)
+  if spawn.owned then return false end -- someone's pet (a swarm pet too: lib/world.lua)
   if t.min_level > 0 and (spawn.level or 0) < t.min_level then return false end
   if t.max_level > 0 and (spawn.level or 0) > t.max_level then return false end
   if spawn.con and t.cons[spawn.con] == false then return false end

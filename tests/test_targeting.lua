@@ -37,3 +37,15 @@ case("targeting: the hunter's filters", function()
   eq(list[1].id, 2, "closest first")
   eq(list[2].id, 1, "then the next")
 end)
+
+case("targeting: someone's pet (a swarm pet too) is never chosen", function()
+  local settings = require('lib.settings')
+  local t = settings.defaults().targeting
+  local corpse = { id = 5, name = "an animated corpse", level = 10, con = "white", owned = true }
+  check(not targeting.allowed(corpse, t), "owned: left out")
+  corpse.owned = false
+  check(targeting.allowed(corpse, t), "else allowed")
+  local list = targeting.hunt_candidates({ { id = 5, name = "x", hp = 100, x = 10, y = 0, z = 0, level = 10, con = "white",
+    owned = true } }, t, settings.defaults().hunter, { 0, 0, 0 }, {}, false)
+  eq(#list, 0, "not a hunt candidate")
+end)

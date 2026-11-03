@@ -23,7 +23,7 @@ local cat = nil                  -- the conditions' catalog
 local sel = { spells = nil, abilities = nil } -- the selected row of each page
 local pick = { spells = "", abilities = "" }   -- the name pickers' filter text
 local spellList, abilityList, abilityRead = nil, nil, -1
-local imported = nil
+local imported = {}               -- the last import's count, by page
 local describe                   -- a condition as words (below)
 
 local MODES = { { "manual", "Manual" }, { "hunter", "Hunter" }, { "assist", "Assist" } }
@@ -319,7 +319,7 @@ local function rowsPage(list, s, h)
     end
     ui.EndTable()
     if #rows == 0 then
-      note(list == "spells" and "No spells yet. Add one, and give it the conditions it fires on."
+      note(list == "spells" and "No spells yet. Import your spell bar, or add one and give it the conditions it fires on."
         or "No abilities yet. Add one, or import the Ability Book's autoskill list.")
     end
     if move then
@@ -340,13 +340,21 @@ local function rowsPage(list, s, h)
   end
   if list == "abilities" then
     ui.SameLine()
-    if ui.Button("Import from Autoskill") then imported = P and P.command("import_autoskill") end
+    if ui.Button("Import from Autoskill") then imported.abilities = P and P.command("import_autoskill") end
     tip("Adds the Ability Book's autoskill list here, with its conditions")
-    if imported then
+    if imported[list] then
       ui.SameLine()
-      ui.TextDisabled(imported == 0 and "nothing new to add" or (imported .. " added"))
+      ui.TextDisabled(imported[list] == 0 and "nothing new to add" or (imported[list] .. " added"))
     end
   else
+    ui.SameLine()
+    if ui.Button("Import spell bar") then imported.spells = P and P.command("import_spellbar") end
+    tip("Adds a row for each memorized spell, in gem order: harmful ones on the fight target in combat, buffs on you"
+      .. " when you lack them, heals on you under 60% health. Change them to suit.")
+    if imported[list] then
+      ui.SameLine()
+      ui.TextDisabled(imported[list] == 0 and "nothing new to add" or (imported[list] .. " added"))
+    end
     ui.SameLine()
     if ui.Button("Refresh spells") then spellList = P and P.spells(true) or nil end
     tip("Read the memorized spells and the spell book again")

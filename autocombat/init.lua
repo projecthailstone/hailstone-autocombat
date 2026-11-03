@@ -147,6 +147,35 @@ local function import_autoskill()
   return added
 end
 
+-- Rows for the memorized spells (the spell bar), added to the Spells page in gem order (not twice).
+local function import_spellbar()
+  load_settings()
+  local have = {}
+  for _, r in ipairs(S.spells) do have[r.name:lower()] = true end
+  local added = 0
+  local gems = tonumber(mq.TLO.Me.NumGems()) or 0
+  for i = 1, gems do
+    local g = mq.TLO.Me.Gem(i)
+    local name = g.Name()
+    if name and name ~= "" and not have[name:lower()] then
+      local row = settings_mod.row_for_spell({
+        name = name,
+        beneficial = g.Beneficial() == true,
+        target_type = g.TargetType() or "",
+        duration = tonumber(g.Duration.TotalSeconds()) or 0,
+      })
+      if row then
+        S.spells[#S.spells + 1] = row
+        have[name:lower()] = true
+        added = added + 1
+      end
+    end
+  end
+  S = settings_mod.repair(S)
+  changed()
+  return added
+end
+
 -- The spells to pick from: the memorized ones first, then the spell book's, by name.
 local function spell_names(refresh)
   if spell_cache and not refresh then return spell_cache end
@@ -220,6 +249,7 @@ hs.ui_function("command", function(what)
   elseif what == "camp" then set_camp()
   elseif what == "clear_camp" then S.hunter.camp = nil changed()
   elseif what == "import_autoskill" then return import_autoskill()
+  elseif what == "import_spellbar" then return import_spellbar()
   end
   return true
 end)

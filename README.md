@@ -34,6 +34,10 @@ fires. A row has:
 
 The **Now** column says why a row is not firing at the moment (not ready, out of range, conditions, recast ...).
 
+**Import spell bar** on the Spells page adds a row for each memorized spell, in gem order, as a starting point to
+change: harmful spells on the fight target in combat, buffs on you when you lack them, heals on you under 60% health,
+pet buffs on your pet again once they run out.
+
 **Import from Autoskill** on the Abilities page copies the Ability Book's autoskill list, with its conditions.
 While Auto Combat runs, autoskill waits; the Ability Book's autoskill button shows "On (held)" during that time.
 
@@ -70,6 +74,10 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 When Hunter finds nothing, the status line says why: no NPCs, every NPC left out by the Targeting page, or the
 zone's navigation mesh still being built (it waits for it), no path to the nearest mobs, or the nearest mobs past the
 longest walk. The Log page has the counts behind it (NPCs in the zone, left out, candidates, no path, too far).
+
+Auto Combat never picks someone's pet, a swarm pet among them (an animated corpse, a necromancer's skeletons ...).
+Stock EQEmu sends a swarm pet with no owner, so it is told by its surname, "<owner>'s Pet", which the server's rule
+`Pets:ClientPetsUseOwnerNameInLastName` (on by default) gives it. With that rule off, a swarm pet looks like any NPC.
 
 Your own movement keys stop any walk or `/stick` it started. Auto Combat pauses by itself when you die, when your
 health falls below the mark you set on the Rest page, or when the server does not allow the mode.
