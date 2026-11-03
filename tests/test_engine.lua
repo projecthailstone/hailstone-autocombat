@@ -219,3 +219,45 @@ case("engine: assist asks the assist's target, joins it once low enough, follows
   engine.tick(e2, fake.world({}), s2, io2)
   eq(e2.status, "No assist", "no assist")
 end)
+
+case("engine: Full and Hunter fight only the extended target's mobs and Hunter's own pick, never a target merely selected", function()
+  for _, mode in ipairs({ "manual", "hunter" }) do
+    local s, e, io = setup({ mode = mode })
+    engine.start(e, io)
+    -- My animated corpse targeted, auto attack on, nothing on me.
+    local corpse = fake.spawn({ id = 30, name = "Gennro`s animated corpse", owned = true })
+    engine.tick(e, fake.world({ target = corpse, me = { combat = true }, pet = fake.spawn({ id = 2, npc = false }) }), s, io)
+    eq(e.fight_id, 0, mode .. ": not fought")
+    check(not io.has("/pet attack"), mode .. ": the pet is not sent")
+    -- An ordinary NPC targeted with attack on but not on me: not Auto Combat's fight either.
+    io.clear()
+    local bystander = fake.spawn({ id = 31 })
+    engine.tick(e, fake.world({ target = bystander, me = { combat = true } }), s, io)
+    eq(e.fight_id, 0, mode .. ": a bystander is not fought")
+  end
+  -- Partial: the player's pick, but never someone's pet.
+  local s, e, io = setup({ style = "partial" })
+  engine.start(e, io)
+  local corpse = fake.spawn({ id = 30, owned = true })
+  engine.tick(e, fake.world({ target = corpse, me = { combat = true } }), s, io)
+  eq(e.fight_id, 0, "partial: not a pet")
+end)
+
+case("engine: pause calls the pet back and turns off the attack Auto Combat started", function()
+  local s, e, io = setup({})
+  engine.start(e, io)
+  local mob = fake.spawn({ id = 9, distance = 5 })
+  local pet = fake.spawn({ id = 2, npc = false })
+  engine.tick(e, fake.world({ haters = { mob }, target = mob, pet = pet }), s, io)
+  check(io.has("/attack on"), "attacking")
+  check(io.has("/pet attack"), "pet sent")
+  io.clear()
+  engine.pause(e, io)
+  check(io.has("/pet back off"), "pet called back")
+  check(io.has("/attack off"), "attack off")
+  -- Paused with nothing started: nothing said to the pet or the attack.
+  local s2, e2, io2 = setup({})
+  engine.start(e2, io2)
+  engine.pause(e2, io2)
+  check(not io2.has("/pet back off") and not io2.has("/attack off"), "nothing to undo")
+end)

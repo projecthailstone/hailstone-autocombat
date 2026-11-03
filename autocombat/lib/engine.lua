@@ -59,11 +59,16 @@ local function stop_moving(e, io)
   end
 end
 
--- Stops what Auto Combat started (not the player's own attack: a pause in a fight leaves it as it is).
+-- Stops what Auto Combat started: its walk or /stick, the auto attack it turned on, the pet it sent (/pet back off).
+-- Not the player's own attack.
 function M.pause(e, io, why)
   if not e.running then return end
   e.running = false
   stop_moving(e, io)
+  if e.attack_on then io.cmd('/attack off') end
+  if e.pet_out then io.cmd('/pet back off') end
+  e.attack_on, e.pet_out = false, false
+  e.pet_sent = {}
   e.fight_id, e.engage_id, e.hunt, e.look_why = 0, 0, nil, nil
   e.status = "Paused"
   note(e, why or "Paused", io)
@@ -143,11 +148,13 @@ local function hater_ids(world)
   return ids
 end
 
--- The mob to fight now, or nil.
+-- The mob to fight now, or nil. Full and Hunter fight only what is on the extended target list (the mobs on me) and
+-- the one Hunter chose to go after; never a target that is merely selected with auto attack on (an animated corpse,
+-- someone's pet), and never someone's pet (lib/world.lua's owned).
 local function fight_target(e, world, s)
   local haters = hater_ids(world)
   local pt = world.target
-  local player_fights = pt and pt.npc and (pt.hp or 0) > 0 and (haters[pt.id] or world.me.combat)
+  local player_fights = pt and pt.npc and not pt.owned and (pt.hp or 0) > 0 and (haters[pt.id] or world.me.combat)
   if s.mode == "manual" and s.style == "partial" then
     -- You choose: the NPC you target, once it is on you or you attack it.
     return player_fights and pt or nil
@@ -159,20 +166,24 @@ local function fight_target(e, world, s)
       local f = world.spawn(e.fight_id)
       if f and (f.hp or 0) > 0 then return f end
     end
-    if a and pt and pt.npc and (pt.hp or 0) > 0 and pt.id ~= a.id and (pt.hp or 100) <= s.assist.engage_pct then
+    if a and pt and pt.npc and not pt.owned and (pt.hp or 0) > 0 and pt.id ~= a.id
+        and (pt.hp or 100) <= s.assist.engage_pct then
       return pt
     end
     return nil
   end
-  -- Full and hunter: the mobs on me first, then one I chose to engage (hunter) or attacked myself.
-  local h = targeting.choose_hater(world.haters, e.fight_id, s.targeting.priority)
+  -- Full and hunter: the mobs on me, then the one Hunter chose to go after.
+  local awake = {}
+  for _, x in ipairs(world.haters) do
+    if not x.owned then awake[#awake + 1] = x end
+  end
+  local h = targeting.choose_hater(awake, e.fight_id, s.targeting.priority)
   if h then return h end
   if e.engage_id ~= 0 then
     local g = world.spawn(e.engage_id)
-    if g and (g.hp or 0) > 0 then return g end
+    if g and (g.hp or 0) > 0 and not g.owned then return g end
     e.engage_id = 0
   end
-  if player_fights then return pt end
   return nil
 end
 
@@ -214,10 +225,12 @@ local function fight(e, world, s, io, f)
   end
   if s.general.attack and not world.me.combat and (t.distance or 999) <= (t.max_range or 14) + 10 then
     io.cmd('/attack on')
+    e.attack_on = true
   end
   if s.general.pet_attack and world.pet and not e.pet_sent[f.id] then
     io.cmd('/pet attack')
     e.pet_sent[f.id] = true
+    e.pet_out = true
   end
   world.fighting = true
   fire_rows(e, world, s, io)
@@ -232,7 +245,10 @@ local function fight_over(e, world, s, io)
     io.cmd('/stick off')
     e.stick_id = 0
   end
-  if world.me.combat and #world.haters == 0 then io.cmd('/attack off') end
+  if world.me.combat and #world.haters == 0 then
+    io.cmd('/attack off')
+    e.attack_on = false
+  end
   e.pet_sent = {}
   local alive = {}
   for _, h in ipairs(world.haters) do alive[h.id] = true end

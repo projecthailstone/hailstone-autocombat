@@ -7,6 +7,7 @@ function M.spawn(t)
     named = t.named or false, npc = t.npc ~= false, pc = t.pc or false, con = t.con or "white",
     x = t.x or 0, y = t.y or 0, z = t.z or 0, max_range = t.max_range or 14, los = t.los,
     mezzed = t.mezzed, slowed = t.slowed, snared = t.snared, rooted = t.rooted, players_near = t.players_near,
+    owned = t.owned,
   }
   if t.buffs then
     s.has_buff = function(n) return t.buffs[n] ~= nil end

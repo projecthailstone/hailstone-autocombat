@@ -16,10 +16,14 @@ local function pct(v) return tonumber(v) or 100 end
 -- familiar burst ...) comes with no owner in its spawn record on stock EQEmu (NPC::PetOnSpawn); what marks it is the
 -- surname "<owner>'s Pet" (the rule Pets:ClientPetsUseOwnerNameInLastName, on by default). A server with that rule
 -- off sends nothing to tell it by, so a swarm pet there looks like any NPC.
+-- Some are also named for their owner: "<owner>`s Animated Corpse" (Wake the Dead, Mob::WakeTheDead), and
+-- "<owner>`s warder" and the like; the name counts when a player of that name is in the zone.
 local function owned(sp)
   if sp.Type() == "Pet" then return true end -- one with an owner in its record
   local surname = (sp.Surname() or ""):lower()
-  return surname:find("['`]s pet$") ~= nil
+  if surname:find("['`]s pet$") then return true end
+  local owner = (sp.CleanName() or sp.Name() or ""):match("^(%a+)[`']s[ _]")
+  return owner ~= nil and mq.TLO.Spawn('pc =' .. owner)() ~= nil
 end
 
 -- A spawn (an MQ spawn value, already known to exist) as a table.

@@ -75,9 +75,14 @@ When Hunter finds nothing, the status line says why: no NPCs, every NPC left out
 zone's navigation mesh still being built (it waits for it), no path to the nearest mobs, or the nearest mobs past the
 longest walk. The Log page has the counts behind it (NPCs in the zone, left out, candidates, no path, too far).
 
-Auto Combat never picks someone's pet, a swarm pet among them (an animated corpse, a necromancer's skeletons ...).
-Stock EQEmu sends a swarm pet with no owner, so it is told by its surname, "<owner>'s Pet", which the server's rule
-`Pets:ClientPetsUseOwnerNameInLastName` (on by default) gives it. With that rule off, a swarm pet looks like any NPC.
+Full and Hunter fight only the mobs on your extended target list (the ones fighting you) and the mob Hunter chose to
+go after: never whatever you happen to have targeted with auto attack on. No mode picks someone's pet, a swarm pet
+among them (an animated corpse, a necromancer's skeletons ...). Stock EQEmu sends a swarm pet with no owner, so it
+is told by its surname, "<owner>'s Pet" (the server's rule `Pets:ClientPetsUseOwnerNameInLastName`, on by default),
+or a name that starts with a player's in the zone, as "<owner>`s Animated Corpse".
+
+Pausing stops what Auto Combat started: its walking or sticking, the auto attack it turned on, and the pet it sent
+(`/pet back off`).
 
 Your own movement keys stop any walk or `/stick` it started. Auto Combat pauses by itself when you die, when your
 health falls below the mark you set on the Rest page, or when the server does not allow the mode.
