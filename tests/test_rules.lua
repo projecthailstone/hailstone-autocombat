@@ -71,3 +71,23 @@ case("rules: a row for someone missing does not fire; disabled rows never", func
   eq(rules.blocker("spells", 2, r[2], w, m), "off", "off")
   eq(rules.next("spells", r, w, m), nil, "nothing")
 end)
+
+case("rules: a burn row fires only in burn mode; \"burn mode on\" is a condition too", function()
+  local r = rows({
+    { name = "Big Nuke", target = "enemy", phase = "combat", burn = true },
+    { name = "Cheap Nuke", target = "enemy", phase = "combat",
+      conditions = { { who = "me", what = "burning", op = "is not" } } },
+  })
+  eq(r[1].burn, true, "the flag is kept")
+  eq(r[2].burn, false, "and defaults off")
+  local spells = { ["Big Nuke"] = { gem = 1, ready = true, range = 200 }, ["Cheap Nuke"] = { gem = 2, ready = true, range = 200 } }
+  local w = fake.world({ target = fake.spawn({ id = 9 }), spells = spells, haters = { fake.spawn({ id = 9 }) },
+    me = { burning = false } })
+  w.fighting = true
+  local m = rules.new_memory()
+  eq(rules.blocker("spells", 1, r[1], w, m), "burn only", "waits for burn mode")
+  eq(rules.next("spells", r, w, m), 2, "the cheap one meanwhile")
+  w.burn, w.me.burning = true, true
+  eq(rules.next("spells", r, w, m), 1, "the burn row first in burn mode")
+  eq(rules.blocker("spells", 2, r[2], w, m), "conditions", "the cheap one holds off while burning")
+end)

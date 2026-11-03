@@ -12,7 +12,11 @@
 -- Two windows: a compact one (the mode, Start / Pause, what it is doing; it opens when the script starts) and the
 -- settings (its gear button, or /autocombat settings).
 --
--- /autocombat [show | settings | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]
+-- Burn mode (the compact window's Burn, /autocombat burn): the rows marked "only during burn" fire only while it is
+-- on; it ends by itself once the extended target list is clear after a fight, or when turned off.
+--
+-- /autocombat [show | settings | on | off | toggle | burn [on|off] | mode manual|hunter|assist | style full|partial |
+--             camp | status]
 -- Settings are kept per server and character in scripts/config/autocombat/. A server may turn modes off in its
 -- hailstone.cfg: [autocombat] manual = off, hunter = off, assist = off.
 local mq = require('mq')
@@ -109,6 +113,12 @@ end
 local function pause(why)
   if E.running then engine.pause(E, act, why) end
   if not why then say("paused.") end
+end
+
+local function burn(on)
+  if on == nil then on = not E.burn end
+  engine.set_burn(E, on, act)
+  say(E.burn and "burn on: the burn rows may fire until the extended target list is clear." or "burn off.")
 end
 
 local function set_camp()
@@ -209,6 +219,7 @@ hs.ui_function("state", function()
     open = open,
     settings_open = settings_open,
     running = E.running,
+    burn = E.burn,
     mode = S.mode,
     style = S.style,
     status = E.running and E.status or "Paused",
@@ -256,6 +267,7 @@ hs.ui_function("command", function(what)
   elseif what == "close" then open = false
   elseif what == "settings" then settings_open = not settings_open
   elseif what == "close_settings" then settings_open = false
+  elseif what == "burn" then burn()
   elseif what == "camp" then set_camp()
   elseif what == "clear_camp" then S.hunter.camp = nil changed()
   elseif what == "import_autoskill" then return import_autoskill()
@@ -274,6 +286,9 @@ mq.bind('/autocombat', function(a, b)
   elseif a == "on" or a == "start" then start()
   elseif a == "off" or a == "pause" or a == "stop" then pause()
   elseif a == "toggle" then if E.running then pause() else start() end
+  elseif a == "burn" then
+    local v = (b or ""):lower()
+    if v == "on" then burn(true) elseif v == "off" then burn(false) else burn() end
   elseif a == "camp" then set_camp()
   elseif a == "mode" or a == "style" then
     local list = a == "mode" and settings_mod.MODES or settings_mod.STYLES
@@ -287,9 +302,11 @@ mq.bind('/autocombat', function(a, b)
     if E.running and allowed()[S.mode] == false then pause("this server does not allow " .. S.mode .. " mode") end
     say(a .. " " .. v .. ".")
   elseif a == "status" then
-    say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "") .. ")")
+    say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "")
+      .. (E.burn and ", burning" or "") .. ")")
   else
-    say("/autocombat [show | settings | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]")
+    say("/autocombat [show | settings | on | off | toggle | burn [on|off] | mode manual|hunter|assist | style full|partial"
+      .. " | camp | status]")
   end
 end)
 
@@ -303,8 +320,13 @@ while true do
     hs.hold_autoskill(want_hold)
     held = want_hold
   end
-  if E.running then
-    local w = world_mod.read(S, allowed())
+  local w = E.running and world_mod.read(S, allowed()) or nil
+  if E.burn and engine.burn_tick(E, w and #w.haters or world_mod.hater_count(), act) then
+    say("burn over: the extended target list is clear.")
+  end
+  if w then
+    w.burn = E.burn
+    w.me.burning = E.burn
     local ok, err = pcall(engine.tick, E, w, S, act)
     if not ok then
       pause("stopped by an error: " .. tostring(err))

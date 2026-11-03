@@ -132,6 +132,7 @@ function M.row(r)
     phase = one_of(r.phase, M.ROW_PHASES, "combat"),
     recast = number(r.recast, 0, 0, 3600),      -- seconds before this row fires again
     per_target = bool(r.per_target, false),     -- the recast counts per fight target (a DoT, a debuff)
+    burn = bool(r.burn, false),                 -- only while burn mode is on
     conditions = {},
   }
   for _, c in ipairs(type(r.conditions) == "table" and r.conditions or {}) do

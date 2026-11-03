@@ -36,6 +36,8 @@ function M.new()
     last_action = { spells = -1e9, abilities = -1e9 },
     last_face = -1e9,
     last_assist = -1e9,
+    burn = false,        -- burn mode: the rows marked "only during burn" may fire (the player turns it on)
+    burn_fought = false, -- a mob was on the player since burn mode came on (it ends when they are all gone)
     last = "",           -- the last thing it did, for the window
     log = {},            -- the last few lines
   }
@@ -73,6 +75,28 @@ function M.pause(e, io, why)
   e.status = "Paused"
   note(e, why or "Paused", io)
   if why then io.say("Auto Combat: " .. why) end
+end
+
+-- Burn mode on or off (the player's button or command).
+function M.set_burn(e, on, io)
+  on = on == true
+  if e.burn == on then return end
+  e.burn, e.burn_fought = on, false
+  note(e, on and "Burn on" or "Burn off", io)
+end
+
+-- Burn mode ends by itself once the extended target list is clear after a fight: on with no mob on the player, it
+-- waits for one first. `haters` is how many mobs are on the player now. Returns true when it ended.
+function M.burn_tick(e, haters, io)
+  if not e.burn then return false end
+  if (haters or 0) > 0 then
+    e.burn_fought = true
+    return false
+  end
+  if not e.burn_fought then return false end
+  e.burn, e.burn_fought = false, false
+  note(e, "Burn over: the extended target list is clear", io)
+  return true
 end
 
 function M.start(e, io)

@@ -104,6 +104,18 @@ local function haters()
   return out
 end
 
+-- How many mobs are on the player (the extended target's auto haters), without reading each one; for burn mode
+-- while Auto Combat is paused.
+function M.hater_count()
+  local n = 0
+  local slots = tonumber(hs.player() and hs.player().xtarget_slots) or 0
+  for i = 1, slots do
+    local x = hs.xtarget(i)
+    if x and x.type == 1 and (x.spawn_id or 0) ~= 0 then n = n + 1 end
+  end
+  return n
+end
+
 -- The group member with the lowest health (not the player), and the main assist (or the one named).
 local function group_tables(settings)
   local lowest, assist

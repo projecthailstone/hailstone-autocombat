@@ -35,6 +35,7 @@ M.properties = {
     { id = "buff", label = "Buff or song", kind = "buff", default = "" },
     { id = "combat", label = "In combat", kind = "bool" },
     { id = "moving", label = "Moving", kind = "bool" },
+    { id = "burning", label = "Burn mode on", kind = "bool" },
   },
   target = {
     { id = "hp", label = "Health %", kind = "pct", default = 90 },

@@ -14,9 +14,17 @@ behind its gear button. It fights for you in one of three modes:
 ## The windows
 
 The compact window opens when the script starts. It has the mode (and Manual's Full or Partial), a Start / Pause
-button, and what Auto Combat is doing, with the last thing it did under it. Drag it by an empty spot; drag its
+button, the Burn button, and what Auto Combat is doing, with the last thing it did under it. Drag it by an empty spot; drag its
 bottom-right corner to scale it. The gear opens the settings window, a page list down the left: Spells, Abilities,
 Targeting, Hunter, Assist, Rest, General and Log.
+
+## Burn mode
+
+The compact window's **Burn** button (or `/autocombat burn`) turns burn mode on: rows ticked **Only during burn**
+(your big discs, AAs and nukes) may fire as well as the others, and the button pulses while it is on. It ends by
+itself once your extended target list is clear after a fight; turned on before the pull, it waits for that fight.
+Click Burn again (or `/autocombat burn off`) to end it sooner. Pausing Auto Combat leaves it as it is. The condition
+"Me Burn mode on" (with "is not") keeps a row back while you burn, a cheap nuke to save mana for instance.
 
 ## The Spells and Abilities pages
 
@@ -87,6 +95,7 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 | `/autocombat` | show or hide the compact window |
 | `/autocombat settings` | show or hide the settings window |
 | `/autocombat on`, `off`, `toggle` | start or pause |
+| `/autocombat burn [on\|off]` | burn mode on or off (no word: switch it) |
 | `/autocombat mode manual\|hunter\|assist` | change the mode |
 | `/autocombat style full\|partial` | change Manual's style |
 | `/autocombat camp` | set Hunter's camp where you stand |

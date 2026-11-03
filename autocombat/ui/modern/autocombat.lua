@@ -207,6 +207,16 @@ local function pill(xr, y, text, col, s, alpha)
   return tw + 12 * s
 end
 
+-- Burn mode's colour, and a small flame drawn in it.
+local BURN = { 1.0, 0.50, 0.14, 1 }
+
+local function flame(cx, cy, size, col, alpha)
+  local r = size * 0.32
+  ui.DrawCircleFilled(cx, cy + size * 0.18, r, col[1], col[2], col[3], alpha)
+  ui.DrawTriangleFilled(cx - r * 0.98, cy + size * 0.12, cx + r * 0.98, cy + size * 0.12, cx + size * 0.05,
+    cy - size * 0.5, col[1], col[2], col[3], alpha)
+end
+
 -- An on / off switch over a hit box drawn just before it.
 local function switch(x0, y0, x1, y1, on, hovered, s, alpha)
   local rad = (y1 - y0) / 2
@@ -427,7 +437,14 @@ local function rotation(list, rows, w, h, s)
     local isz = tileH - 14 * s
     icon(e, r.name, x0 + 26 * s, ty + 7 * s, isz, s, nil, dim)
     local nx = x0 + 26 * s + isz + 10 * s
-    T.Text(nx, ty + 7 * s, T.Fit(r.name, swx0 - nx - 8 * s, T.font.normal), C.text, T.font.normal, nil, dim)
+    local nameEnd = swx0 - 8 * s
+    if r.burn then
+      -- burn-only: a flame, lit while burn mode is on
+      local lit = st.burn and (0.6 + 0.4 * math.sin(ui.GetTime() * 7)) or 0.55
+      flame(swx0 - 14 * s, ty + 17 * s, 13 * s, BURN, lit * dim)
+      nameEnd = swx0 - 26 * s
+    end
+    T.Text(nx, ty + 7 * s, T.Fit(r.name, nameEnd - nx, T.font.normal), C.text, T.font.normal, nil, dim)
     switch(swx0, swy0, swx1, swy1, r.enabled, swHover, s, alpha)
     -- what it is doing now, at the right of the second line
     local ly = ty + 9 * s + hn
@@ -664,6 +681,10 @@ local function details(list, rows, x, y, w, h, s)
   local pt = check("for each target##acpt" .. list, r.per_target)
   if pt ~= nil then r.per_target = pt push(list, rows) end
   tip("Count the recast per fight target: a damage over time or a debuff, when the server does not send the target's buffs")
+  field("Burn", s, col)
+  local bu = check("Only during burn##acbu" .. list, r.burn)
+  if bu ~= nil then r.burn = bu push(list, rows) end
+  tip("Fires only while burn mode is on (the compact window's Burn, /autocombat burn): your big discs, AAs and nukes")
   section("Conditions", s)
   if #r.conditions == 0 then note("None: it fires whenever it is ready.") end
   conditionEditor(list, r, rows, s)
@@ -990,9 +1011,43 @@ local MODE_TIPS = {
   assist = "It fights what your assist fights",
 }
 
--- The compact window: the mode, Start / Pause and what it is doing.
+-- The Burn button: lit and pulsing while burn mode is on. Returns clicked.
+local function burnButton(x0, y0, x1, y1, s, on)
+  local hit = T.Hit("##acburn", x0, y0, x1, y1)
+  local hovered, active = ui.IsItemHovered(), ui.IsItemActive()
+  local rad = 8 * s
+  local pulse = on and (0.5 + 0.5 * math.sin(ui.GetTime() * 7)) or 0
+  if on then
+    ui.DrawRectFilled(x0 - 4 * s, y0 - 4 * s, x1 + 4 * s, y1 + 4 * s, BURN[1], BURN[2], BURN[3], 0.10 + 0.30 * pulse,
+      rad + 4 * s)
+    local top, bottom = mix(BURN, { 1, 0.9, 0.5 }, 0.25 + 0.35 * pulse), mix(BURN, { 0.5, 0.05, 0 }, 0.35)
+    ui.DrawRectFilled(x0, y0 + 2 * s, x1, y1 + 2 * s, 0, 0, 0, 0.30, rad)
+    ui.DrawRectFilled(x0, y0, x1, y1, bottom[1], bottom[2], bottom[3], active and 0.8 or 0.95, rad)
+    ui.DrawRectFilled(x0, y0, x1, y0 + (y1 - y0) * 0.55, top[1], top[2], top[3], 0.9, rad)
+    ui.DrawRect(x0, y0, x1, y1, 1, 0.85, 0.5, 0.6 + 0.4 * pulse, rad, 1.5 * s)
+  else
+    ui.DrawRectFilled(x0, y0, x1, y1, BURN[1], BURN[2], BURN[3], active and 0.20 or (hovered and 0.14 or 0.07), rad)
+    ui.DrawRect(x0, y0, x1, y1, BURN[1], BURN[2], BURN[3], hovered and 0.8 or 0.45, rad, 1.2 * s)
+  end
+  local word = "Burn"
+  local tw, th = T.TextSize(word, T.font.normal)
+  local fw = 10 * s
+  local gx = (x0 + x1 - tw - fw - 5 * s) / 2
+  local cy = (y0 + y1) / 2
+  local ic = on and (C.barText or { 1, 1, 1, 1 }) or BURN
+  flame(gx + fw / 2, cy, 14 * s, ic, 1)
+  T.Text(gx + fw + 5 * s, cy - th / 2, word, ic, T.font.normal, nil, 1, on and C.barShadow or nil)
+  if hovered then
+    ui.SetTooltip(on and "Burn mode is on: the burn rows fire. It ends by itself once the extended target list is clear;"
+      .. " click to end it now (/autocombat burn off)."
+      or "Burn mode: rows marked \"Only during burn\" fire until this fight is over (/autocombat burn)")
+  end
+  return hit
+end
+
+-- The compact window: the mode, Start / Pause, Burn and what it is doing.
 local function compactSize(s)
-  return 340, S.mode == "manual" and 160 or 128
+  return 380, S.mode == "manual" and 160 or 128
 end
 
 local function compact(x, y, w, h, s)
@@ -1005,6 +1060,13 @@ local function compact(x, y, w, h, s)
   if running then ui.DrawCircleFilled(x + pad + 4 * s, y + 15 * s, 7 * s, light[1], light[2], light[3], glow) end
   ui.DrawCircleFilled(x + pad + 4 * s, y + 15 * s, 4 * s, light[1], light[2], light[3], 1)
   T.Text(x + pad + 14 * s, y + 8 * s, "AUTO COMBAT", C.muted, T.font.small)
+  if st.burn then
+    local tw = T.TextSize("AUTO COMBAT", T.font.small)
+    local bx = x + pad + 24 * s + tw
+    local a = 0.55 + 0.45 * math.sin(t * 7)
+    flame(bx + 5 * s, y + 15 * s, 12 * s, BURN, a)
+    T.Text(bx + 13 * s, y + 8 * s, "BURNING", BURN, T.font.small, nil, a)
+  end
   if gearButton("##acgear", x + w - 44 * s, y + 4 * s, 18 * s, s, st.settings_open) then P.command("settings") end
 
   -- the mode, and Manual's style
@@ -1050,9 +1112,11 @@ local function compact(x, y, w, h, s)
   T.Text(gx + iconW + 6 * s, cy - th / 2, word, ic, T.font.normal, nil, 1, C.barShadow)
   if hit then P.command(running and "pause" or "start") end
   if hovered then ui.SetTooltip(running and "Pause (/autocombat off)" or "Start (/autocombat on)") end
+  local kx0 = bx0 + bw + 8 * s
+  if burnButton(kx0, by0, kx0 + 76 * s, by0 + bh, s, st.burn) then P.command("burn") end
 
   -- the status and the last thing it did
-  local sx = bx0 + bw + 12 * s
+  local sx = kx0 + 76 * s + 12 * s
   local room = x + w - pad - sx
   local status = st.status or ""
   local sc = running and C.text or C.muted
