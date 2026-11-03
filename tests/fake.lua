@@ -16,7 +16,8 @@ function M.spawn(t)
 end
 
 -- opts: me = {...}, target = spawn, haters = {spawns}, spells = {name = {...}}, ready = {kind:name = true},
--- spawns = {spawns (by id)}, hunt = {spawns}, paths = {id = length}, pet, group, assist, now, allowed
+-- spawns = {spawns (by id)}, hunt = {spawns}, paths = {id = length}, pet, group, assist, now, allowed,
+-- mesh = {loaded, complete, built, total}
 function M.world(opts)
   opts = opts or {}
   local me = {
@@ -43,6 +44,7 @@ function M.world(opts)
     target_id = opts.target and opts.target.id or 0,
     pet = opts.pet, group = opts.group, assist = opts.assist,
     nav_active = opts.nav_active or false,
+    mesh = opts.mesh,
     zone = opts.zone or "testzone",
   }
   function w.spawn(id) return by_id[id] end

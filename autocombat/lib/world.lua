@@ -180,9 +180,19 @@ function M.read(settings, allowed)
     return false, "not ready"
   end
 
+  -- The walk to a spawn over the mesh; nil when there is none (yet).
   function w.path_length(id)
-    return tonumber(mq.TLO.Navigation.PathLength('id ' .. id)())
+    local len = tonumber(mq.TLO.Navigation.PathLength('id ' .. id)())
+    if not len or len < 0 then return nil end
+    return len
   end
+  local nav = mq.TLO.Navigation
+  w.mesh = {
+    loaded = nav.MeshLoaded() == true,
+    complete = nav.MeshComplete() == true,
+    built = tonumber(nav.TilesBuilt()) or 0,
+    total = tonumber(nav.TilesTotal()) or 0,
+  }
 
   -- Hunter: the live NPCs in the zone (not pets), each marked when another player is within the settings' radius.
   function w.hunt_spawns()

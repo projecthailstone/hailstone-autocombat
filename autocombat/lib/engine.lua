@@ -14,6 +14,7 @@ local targeting = require('lib.targeting')
 local M = {}
 
 local SKIP_MS = 5 * 60 * 1000 -- a mob given up on is left this long
+local NO_PATH_MS = 20 * 1000  -- a mob with no path while the zone's mesh is still being built is tried again after this
 local FACE_MS = 1000          -- how often a fight target is faced when not sticking
 local ASSIST_MS = 1500        -- how often /assist asks again while there is nothing to fight
 local LOOK_MS = 1000          -- hunter: how often it looks for a mob
@@ -361,18 +362,41 @@ local function hunt(e, world, s, io)
     if until_ms <= world.now then e.skip[id] = nil end
   end
   local from = camp or { me.x, me.y, me.z }
-  local list = targeting.hunt_candidates(world.hunt_spawns(), s.targeting, h, from, e.skip, camp ~= nil)
+  local all = world.hunt_spawns()
+  local list, filtered = targeting.hunt_candidates(all, s.targeting, h, from, e.skip, camp ~= nil)
+  -- Roam: nothing within the search radius, so anywhere in the zone, nearest first, however long the walk.
+  local wide = false
+  if #list == 0 and not camp then
+    list = targeting.hunt_candidates(all, s.targeting, h, from, e.skip, false, true)
+    wide = true
+  end
+  local mesh = world.mesh or { loaded = true, complete = true }
+  local no_path = 0
   for n = 1, math.min(#list, 5) do
     local m = list[n]
     local len = world.path_length(m.id)
-    if len and len >= 0 and len <= h.max_path then
+    if len and len >= 0 and (wide or len <= h.max_path) then
       e.hunt = { id = m.id, since = world.now }
       note(e, "Hunting " .. (m.name or "?"), io)
       return
     end
-    e.skip[m.id] = world.now + SKIP_MS
+    if not len or len < 0 then no_path = no_path + 1 end
+    -- No path yet while the mesh is still building is not the mob's fault: try it again soon.
+    e.skip[m.id] = world.now + ((not len or len < 0) and not mesh.complete and NO_PATH_MS or SKIP_MS)
   end
-  e.status = "Looking for mobs"
+  if #all == 0 then
+    e.status = "No NPCs in the zone"
+  elseif not mesh.loaded then
+    e.status = "No navigation mesh for this zone yet"
+  elseif no_path > 0 and not mesh.complete then
+    e.status = string.format("Waiting for the navigation mesh (%d/%d)", mesh.built or 0, mesh.total or 0)
+  elseif #list == 0 and filtered == #all then
+    e.status = string.format("No mobs to hunt: the Targeting page leaves out all %d NPCs", #all)
+  elseif #list == 0 then
+    e.status = "No mobs to hunt (the ones left are skipped for now)"
+  else
+    e.status = "Looking for mobs (none reachable yet)"
+  end
 end
 
 -- ---------------------------------------------------------------- assisting

@@ -7,7 +7,7 @@ script and has its own window, **Auto Combat**. It fights for you in one of thre
 |---|---|---|
 | **Manual: Full** | Run into the mobs. | Targets the mobs that are on you, keeps you in melee range, attacks, sends your pet and uses your spells and abilities. When one mob dies it moves to the next. |
 | **Manual: Partial** | Stand where you want and pick the mob. | Uses your spells and abilities on the NPC you target, once it is fighting you or you attack it. It never moves you; it only turns you to face the mob. |
-| **Hunter** | Press Start. | Everything Full does. When nothing is on you, it rests, finds a mob and walks to it over the navigation mesh, until you pause it. It can roam the zone or pull mobs back to a camp. |
+| **Hunter** | Press Start. | Everything Full does. When nothing is on you, it rests, finds a mob and walks to it over the navigation mesh, until you pause it. It can roam the zone (nearby mobs first, then anywhere it can walk to) or pull mobs back to a camp. |
 | **Assist** | Group up, or pick who to assist. | Everything Full does, but it only fights what your assist is fighting, once that mob's health is low enough. Between fights it follows the assist. |
 
 ## The Spells and Abilities pages
@@ -57,6 +57,9 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 | `/autocombat style full\|partial` | change Manual's style |
 | `/autocombat camp` | set Hunter's camp where you stand |
 | `/autocombat status` | what it is doing |
+
+When Hunter finds nothing, the status line says why: no NPCs, every NPC left out by the Targeting page, or the
+zone's navigation mesh still being built (it waits for it).
 
 Your own movement keys stop any walk or `/stick` it started. Auto Combat pauses by itself when you die, when your
 health falls below the mark you set on the Rest page, or when the server does not allow the mode.

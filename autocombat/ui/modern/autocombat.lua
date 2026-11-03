@@ -386,6 +386,7 @@ local function hunterPage(s)
     ui.SameLine(260 * s)
     local r = number("##acrad", t.radius, 80 * s, 10, 5000)
     if r then set("targeting.radius", r) end
+    ui.TextDisabled("Mobs within the radius come first. With none there, it goes anywhere in the zone.")
   end
   caption("Height range")
   ui.SameLine(260 * s)

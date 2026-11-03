@@ -56,15 +56,18 @@ local function flat(a, b)
 end
 
 -- Hunter: the mobs worth walking to, best first. `from` is where it looks from (me, or the camp), `skip` the ids
--- given up on.
-function M.hunt_candidates(spawns, t, h, from, skip, camp_style)
-  local out = {}
+-- given up on. `whole_zone` drops the search radius (roam, when nothing is near). The second result counts the mobs
+-- the targeting settings left out, for the status line.
+function M.hunt_candidates(spawns, t, h, from, skip, camp_style, whole_zone)
+  local out, filtered = {}, 0
   for _, s in ipairs(spawns) do
-    if not skip[s.id] and (s.hp or 0) > 0 and M.allowed(s, t) and not (t.skip_near_players and s.players_near) then
+    local wanted = (s.hp or 0) > 0 and M.allowed(s, t) and not (t.skip_near_players and s.players_near)
+    if not wanted then filtered = filtered + 1 end
+    if wanted and not skip[s.id] then
       local d = flat({ s.x, s.y }, from)
       local dz = math.abs((s.z or 0) - (from[3] or 0))
       local reach = camp_style and h.leash or t.radius
-      if d <= reach and dz <= t.zradius then
+      if whole_zone or (d <= reach and dz <= t.zradius) then
         s.from_distance = d
         out[#out + 1] = s
       end
@@ -75,7 +78,7 @@ function M.hunt_candidates(spawns, t, h, from, skip, camp_style)
     if a.from_distance ~= b.from_distance then return a.from_distance < b.from_distance end
     return a.id < b.id
   end)
-  return out
+  return out, filtered
 end
 
 return M

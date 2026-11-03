@@ -130,6 +130,43 @@ case("engine: hunter roams to a mob over the mesh, engages it in reach, and give
   check(io3.has("/nav stop"), "walk stopped")
 end)
 
+case("engine: hunter roaming looks past the search radius when nothing is near", function()
+  local s, e, io = setup({ mode = "hunter" })
+  local far = fake.spawn({ id = 50, name = "a far wolf", x = 3000, y = 0, distance = 3000 })
+  local w = fake.world({ hunt = { far }, spawns = { far }, paths = { [50] = 3500 } })
+  engine.tick(e, w, s, io)
+  eq(e.hunt and e.hunt.id, 50, "chose the far one, however long the walk")
+  -- A camp keeps to its leash.
+  local s2, e2, io2 = setup({ mode = "hunter", hunter = { style = "camp", camp = { x = 0, y = 0, z = 0, zone = "testzone" } } })
+  local w2 = fake.world({ hunt = { far }, spawns = { far }, paths = { [50] = 3500 } })
+  engine.tick(e2, w2, s2, io2)
+  eq(e2.hunt, nil, "camp: not past the leash")
+end)
+
+case("engine: hunter waits for the mesh instead of skipping mobs for long, and says why it finds none", function()
+  local s, e, io = setup({ mode = "hunter" })
+  local mob = fake.spawn({ id = 60, x = 80, y = 0, distance = 80 })
+  local w = fake.world({ hunt = { mob }, spawns = { mob }, paths = {},
+    mesh = { loaded = true, complete = false, built = 3, total = 10 } })
+  engine.tick(e, w, s, io)
+  eq(e.hunt, nil, "no path yet")
+  eq(e.status, "Waiting for the navigation mesh (3/10)", "status")
+  check(e.skip[60] and e.skip[60] - w.now <= 20000, "tried again soon")
+  -- Once the mesh has its path, it goes.
+  w.now = w.now + 21000
+  w.path_length = function() return 90 end
+  engine.tick(e, w, s, io)
+  eq(e.hunt and e.hunt.id, 60, "chose it once there is a path")
+  -- All left out by the Targeting page.
+  local s2, e2, io2 = setup({ mode = "hunter" })
+  local grey = fake.spawn({ id = 70, x = 50, y = 0, distance = 50, con = "grey" })
+  engine.tick(e2, fake.world({ hunt = { grey }, spawns = { grey }, paths = { [70] = 60 } }), s2, io2)
+  eq(e2.status, "No mobs to hunt: the Targeting page leaves out all 1 NPCs", "filtered status")
+  local s3, e3, io3 = setup({ mode = "hunter" })
+  engine.tick(e3, fake.world({ hunt = {} }), s3, io3)
+  eq(e3.status, "No NPCs in the zone", "empty zone")
+end)
+
 case("engine: hunter at a camp pulls with a spell and walks back", function()
   local s, e, io = setup({ mode = "hunter", hunter = { style = "camp", camp = { x = 0, y = 0, z = 0, zone = "testzone" },
     pull_kind = "spell", pull_name = "Pull" } })
