@@ -147,6 +147,16 @@ local function import_autoskill()
   return added
 end
 
+-- A starting row for a spell (settings.row_for_spell): what the spell is decides its target, phase and conditions.
+local function spell_row(sp, name)
+  return settings_mod.row_for_spell({
+    name = name,
+    beneficial = sp.Beneficial() == true,
+    target_type = sp.TargetType() or "",
+    duration = tonumber(sp.Duration.TotalSeconds()) or 0,
+  })
+end
+
 -- Rows for the memorized spells (the spell bar), added to the Spells page in gem order (not twice).
 local function import_spellbar()
   load_settings()
@@ -158,12 +168,7 @@ local function import_spellbar()
     local g = mq.TLO.Me.Gem(i)
     local name = g.Name()
     if name and name ~= "" and not have[name:lower()] then
-      local row = settings_mod.row_for_spell({
-        name = name,
-        beneficial = g.Beneficial() == true,
-        target_type = g.TargetType() or "",
-        duration = tonumber(g.Duration.TotalSeconds()) or 0,
-      })
+      local row = spell_row(g, name)
       if row then
         S.spells[#S.spells + 1] = row
         have[name:lower()] = true
@@ -217,6 +222,10 @@ end)
 hs.ui_function("settings", function() load_settings() return S end)
 hs.ui_function("catalog", function() return catalog end)
 hs.ui_function("spells", function(refresh) return spell_names(refresh) end)
+hs.ui_function("row_for_spell", function(name)
+  if type(name) ~= "string" or name == "" then return nil end
+  return spell_row(mq.TLO.Spell(name), name)
+end)
 hs.ui_function("set", function(path, value)
   local ok
   S, ok = settings_mod.set(S, path, value)

@@ -32,7 +32,16 @@ fires. A row has:
 - **Conditions:** for example "Me Health % < 50", "Target Health % > 20", "Me lacks Spirit of Wolf",
   "Target is named", "Mobs on me >= 2". Every condition must hold.
 
-The **Now** column says why a row is not firing at the moment (not ready, out of range, conditions, recast ...).
+Each page shows the rotation as tiles, in the books' look: the spell's or ability's icon, its name, a line with on
+whom, when and its conditions, and a switch to turn the row off without losing it. Drag a tile to move it up or down
+the list, or right-click it (change, move, duplicate, remove). While Auto Combat runs, each tile says why it is not
+firing at the moment (not ready, out of range, conditions, recast ...); a row whose spell is no longer in your spell
+book is marked.
+
+The selected row shows at the right as the book shows it: its icon, level, cost, cast and recast time or reuse, and
+Info for the spell's own window; then on whom, when, the recast and the conditions. **+ Add** and **Change** open
+your spell book or the Ability Book as icon tiles to pick from, with a search and filters (memorized, beneficial,
+detrimental; AAs, combat abilities, skills). A spell added this way starts with the same guess as Import spell bar.
 
 **Import spell bar** on the Spells page adds a row for each memorized spell, in gem order, as a starting point to
 change: harmful spells on the fight target in combat, buffs on you when you lack them, heals on you under 60% health,
