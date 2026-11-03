@@ -9,7 +9,10 @@
 --                    once its health is low enough, and follows the assist between fights.
 -- The Spells and Abilities pages are ordered rows: the first row whose conditions hold and that is ready fires.
 --
--- /autocombat [show | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]
+-- Two windows: a compact one (the mode, Start / Pause, what it is doing; it opens when the script starts) and the
+-- settings (its gear button, or /autocombat settings).
+--
+-- /autocombat [show | settings | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]
 -- Settings are kept per server and character in scripts/config/autocombat/. A server may turn modes off in its
 -- hailstone.cfg: [autocombat] manual = off, hunter = off, assist = off.
 local mq = require('mq')
@@ -27,7 +30,8 @@ local S = settings_mod.defaults()   -- the settings in use
 local rev = 1                       -- bumped on every change, so the window knows to read them again
 local dirty_at = nil                -- when an unsaved change was made
 local loaded_for = nil              -- the settings file loaded ("" before a character is in the world)
-local open = true                   -- the window shows (from the start, so /lua run brings it up)
+local open = true                   -- the compact window shows (from the start, so /lua run brings it up)
+local settings_open = false         -- the settings window shows
 local E = engine.new()
 local held = false                  -- autoskill held
 local row_status = { spells = {}, abilities = {} }
@@ -168,6 +172,7 @@ end
 hs.ui_function("state", function()
   return {
     open = open,
+    settings_open = settings_open,
     running = E.running,
     mode = S.mode,
     style = S.style,
@@ -210,6 +215,8 @@ hs.ui_function("command", function(what)
   elseif what == "pause" then pause()
   elseif what == "toggle" then if E.running then pause() else start() end
   elseif what == "close" then open = false
+  elseif what == "settings" then settings_open = not settings_open
+  elseif what == "close_settings" then settings_open = false
   elseif what == "camp" then set_camp()
   elseif what == "clear_camp" then S.hunter.camp = nil changed()
   elseif what == "import_autoskill" then return import_autoskill()
@@ -223,6 +230,7 @@ hs.menu("Auto Combat", "/autocombat show")
 mq.bind('/autocombat', function(a, b)
   a = (a or ""):lower()
   if a == "" or a == "show" then open = not open
+  elseif a == "settings" or a == "setup" then settings_open = not settings_open
   elseif a == "on" or a == "start" then start()
   elseif a == "off" or a == "pause" or a == "stop" then pause()
   elseif a == "toggle" then if E.running then pause() else start() end
@@ -241,7 +249,7 @@ mq.bind('/autocombat', function(a, b)
   elseif a == "status" then
     say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "") .. ")")
   else
-    say("/autocombat [show | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]")
+    say("/autocombat [show | settings | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]")
   end
 end)
 
@@ -260,7 +268,7 @@ while true do
     local ok, err = pcall(engine.tick, E, w, S, act)
     if not ok then
       pause("stopped by an error: " .. tostring(err))
-    elseif open and w.in_game and mq.gettime() - last_status > 500 then
+    elseif settings_open and w.in_game and mq.gettime() - last_status > 500 then
       -- Why each row would not fire now, for the window.
       last_status = mq.gettime()
       for _, list in ipairs({ "spells", "abilities" }) do

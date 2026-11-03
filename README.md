@@ -1,7 +1,8 @@
 # Auto Combat for Hailstone
 
 A combat helper for the [Hailstone](https://github.com/projecthailstone) EverQuest client. It runs as a Lua
-script and has its own window, **Auto Combat**. It fights for you in one of three modes:
+script with a small **Auto Combat** window (the mode, Start / Pause and what it is doing) and a settings window
+behind its gear button. It fights for you in one of three modes:
 
 | Mode | What you do | What Auto Combat does |
 |---|---|---|
@@ -9,6 +10,13 @@ script and has its own window, **Auto Combat**. It fights for you in one of thre
 | **Manual: Partial** | Stand where you want and pick the mob. | Uses your spells and abilities on the NPC you target, once it is fighting you or you attack it. It never moves you; it only turns you to face the mob. |
 | **Hunter** | Press Start. | Everything Full does. When nothing is on you, it rests, finds a mob and walks to it over the navigation mesh, until you pause it. It can roam the zone (nearby mobs first, then anywhere it can walk to) or pull mobs back to a camp. |
 | **Assist** | Group up, or pick who to assist. | Everything Full does, but it only fights what your assist is fighting, once that mob's health is low enough. Between fights it follows the assist. |
+
+## The windows
+
+The compact window opens when the script starts. It has the mode (and Manual's Full or Partial), a Start / Pause
+button, and what Auto Combat is doing, with the last thing it did under it. Drag it by an empty spot; drag its
+bottom-right corner to scale it. The gear opens the settings window, a page list down the left: Spells, Abilities,
+Targeting, Hunter, Assist, Rest, General and Log.
 
 ## The Spells and Abilities pages
 
@@ -39,8 +47,8 @@ Spells must be memorized to be cast; Auto Combat does not memorize spells for yo
    you have `scripts/autocombat/init.lua`.)
 2. In the game, type `/lua run autocombat`. To start it at every login, add it to `hailstone.ini`:
    `scripts.autoload = autocombat`.
-3. The window opens when the script starts. Hide or show it with `/autocombat`, or from the EQ menu: **Plugins > Auto
-   Combat**.
+3. The compact window opens when the script starts. Hide or show it with `/autocombat`, or from the EQ menu:
+   **Plugins > Auto Combat**. Its gear (or `/autocombat settings`) opens the settings.
 
 You need a Hailstone client that has `/stick`, `Me.AbilityReady` and `hailstone.use_ability`. Hunter mode also
 needs the zone's navigation mesh, which Hailstone builds by itself.
@@ -51,7 +59,8 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 
 | Command | |
 |---|---|
-| `/autocombat` | show or hide the window |
+| `/autocombat` | show or hide the compact window |
+| `/autocombat settings` | show or hide the settings window |
 | `/autocombat on`, `off`, `toggle` | start or pause |
 | `/autocombat mode manual\|hunter\|assist` | change the mode |
 | `/autocombat style full\|partial` | change Manual's style |
@@ -80,7 +89,7 @@ hunter = off     ; no unattended hunting
 assist = on
 ```
 
-A mode that is off is greyed out in the window, and Auto Combat pauses if someone switches to it.
+A mode that is off is greyed out in the compact window, and Auto Combat pauses if someone switches to it.
 
 ## Releasing
 
