@@ -1,12 +1,18 @@
--- Auto Combat: which row of the Spells or Abilities page fires next. Pure: the snapshot (lib/world.lua) answers
+-- Auto Combat: which row of the Spells, Abilities or Items page fires next. Pure: the snapshot (lib/world.lua) answers
 -- what needs the game (world.ready(row), world.spell(name)), and `memory` keeps when each row last fired.
 --
--- A row fires when it is enabled, its phase holds, the one it acts on is there (and for the fight target in sight),
--- it is ready (a memorized, ready spell with the mana; a ready ability), within range, its recast has passed and
--- every condition holds. Rows are tried in order: the first that may fire is the one.
+-- A row fires when it is enabled (and, marked "only during burn", while burn mode is on), its phase holds, the one it acts on is there (and for the fight target in sight),
+-- it is ready (a memorized, ready spell with the mana; a ready ability; a carried item whose click has recast),
+-- within range, its recast has passed and every condition holds. Rows are tried in order: the first that may fire is
+-- the one.
+--
+-- An item is not clicked again within ITEM_GAP seconds of its last click: the item's own recast comes from the
+-- server's answer, and a click the server refuses (a worn-only item in a bag, a level too low) starts none.
 local conditions = require('lib.conditions')
 
 local M = {}
+
+M.ITEM_GAP = 3
 
 -- The table a row acts on: the fight target, me, the pet, the lowest group member or the assist.
 function M.recipient(row, world)
@@ -40,6 +46,7 @@ end
 -- Why a row cannot fire now ("" when it can), for the window's "why not" column and the tests.
 function M.blocker(list, i, row, world, memory)
   if not row.enabled then return "off" end
+  if row.burn and not world.burn then return "burn only" end
   if world.me.casting then return "casting" end
   if not M.phase_holds(row, world) then return "phase" end
   local to = M.recipient(row, world)
@@ -47,13 +54,15 @@ function M.blocker(list, i, row, world, memory)
   if row.target == "enemy" and to.los == false then return "not in sight" end
   local ready, why = world.ready(row)
   if not ready then return why or "not ready" end
-  if row.kind == "spell" then
-    local s = world.spell(row.name)
-    if not s then return "unknown spell" end
+  if row.kind == "spell" or row.kind == "item" then
+    -- a spell's range and cast time; an item's are its click spell's and its own
+    local s = row.kind == "spell" and world.spell(row.name) or world.item(row.name)
+    if not s then return row.kind == "spell" and "unknown spell" or "not carried" end
     if (s.range or 0) > 0 and to ~= world.me and (to.distance or 0) > s.range then return "out of range" end
     if (s.cast_time or 0) > 0 and world.me.moving then return "moving" end
   end
   local k = key(list, i, row)
+  if row.kind == "item" and memory.last[k] and world.now - memory.last[k] < M.ITEM_GAP * 1000 then return "just used" end
   if not M.recast_passed(row, memory, k, world.now, to.id) then return "recast" end
   if not conditions.all(row.conditions, world) then return "conditions" end
   return ""

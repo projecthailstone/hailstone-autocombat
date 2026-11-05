@@ -12,7 +12,14 @@
 -- Two windows: a compact one (the mode, Start / Pause, what it is doing; it opens when the script starts) and the
 -- settings (its gear button, or /autocombat settings).
 --
--- /autocombat [show | settings | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]
+-- Burn mode (the compact window's Burn, /autocombat burn): the rows marked "only during burn" fire only while it is
+-- on; it ends by itself once the extended target list is clear after a fight, or when turned off.
+--
+-- The extended target window (the Modern pack's, through its lib/xtarget.lua) gets Force (fight this one first, until
+-- it dies) and Ignore (leave it alone while anything else is on the list) on each mob.
+--
+-- /autocombat [show | settings | on | off | toggle | burn [on|off] | force | ignore |
+--             mode manual|hunter|assist | style full|partial | camp | status]
 -- Settings are kept per server and character in scripts/config/autocombat/. A server may turn modes off in its
 -- hailstone.cfg: [autocombat] manual = off, hunter = off, assist = off.
 local mq = require('mq')
@@ -34,7 +41,7 @@ local open = true                   -- the compact window shows (from the start,
 local settings_open = false         -- the settings window shows
 local E = engine.new()
 local held = false                  -- autoskill held
-local row_status = { spells = {}, abilities = {} }
+local row_status = { spells = {}, abilities = {}, items = {} }
 local spell_cache = nil
 
 local function say(text) hs.chat('[Auto Combat] ' .. text, 15) end
@@ -111,6 +118,45 @@ local function pause(why)
   if not why then say("paused.") end
 end
 
+-- ---------------------------------------------------------------- the extended target list and the marks
+
+local function alive(id)
+  local sp = mq.TLO.Spawn('id ' .. id)
+  return sp() ~= nil and sp.Type() ~= "Corpse" and (tonumber(sp.PctHPs()) or 0) > 0
+end
+
+-- Each slot of the extended target list, in order ({ id = 0 } when empty), for the window's buttons; and the ids of
+-- its auto haters.
+local function xtargets()
+  local out, haters = {}, {}
+  local n = tonumber(hs.player() and hs.player().xtarget_slots) or 0
+  for i = 1, n do
+    local x = hs.xtarget(i)
+    local id = x and x.spawn_id or 0
+    out[i] = { id = id, name = x and x.name or "" }
+    if id ~= 0 and x.type == 1 then haters[#haters + 1] = id end
+  end
+  return out, haters
+end
+
+local xt_list = {}
+
+local function mark(kind, id, name)
+  if not id or id == 0 then
+    local t = mq.TLO.Target
+    id, name = tonumber(t.ID()) or 0, t.CleanName()
+    if id == 0 then return say("target a mob first.") end
+  end
+  if kind == "force" then engine.force(E, id, name, act) else engine.ignore(E, id, name, act) end
+  say(E.last .. ".")
+end
+
+local function burn(on)
+  if on == nil then on = not E.burn end
+  engine.set_burn(E, on, act)
+  say(E.burn and "burn on: the burn rows may fire until the extended target list is clear." or "burn off.")
+end
+
 local function set_camp()
   load_settings()
   S.hunter.camp = { x = mq.TLO.Me.X(), y = mq.TLO.Me.Y(), z = mq.TLO.Me.Z(), zone = mq.TLO.Zone.ShortName() or "" }
@@ -147,6 +193,17 @@ local function import_autoskill()
   return added
 end
 
+-- A starting row for a spell (settings.row_for_spell): what the spell is decides its target, phase and conditions.
+local function spell_row(sp, name)
+  return settings_mod.row_for_spell({
+    name = name,
+    beneficial = sp.Beneficial() == true,
+    target_type = sp.TargetType() or "",
+    duration = tonumber(sp.Duration.TotalSeconds()) or 0,
+    ae_range = tonumber(sp.AERange()) or 0,
+  })
+end
+
 -- Rows for the memorized spells (the spell bar), added to the Spells page in gem order (not twice).
 local function import_spellbar()
   load_settings()
@@ -158,12 +215,7 @@ local function import_spellbar()
     local g = mq.TLO.Me.Gem(i)
     local name = g.Name()
     if name and name ~= "" and not have[name:lower()] then
-      local row = settings_mod.row_for_spell({
-        name = name,
-        beneficial = g.Beneficial() == true,
-        target_type = g.TargetType() or "",
-        duration = tonumber(g.Duration.TotalSeconds()) or 0,
-      })
+      local row = spell_row(g, name)
       if row then
         S.spells[#S.spells + 1] = row
         have[name:lower()] = true
@@ -203,6 +255,15 @@ hs.ui_function("state", function()
     open = open,
     settings_open = settings_open,
     running = E.running,
+    burn = E.burn,
+    xtargets = xt_list,
+    force_id = E.force_id,
+    ignored = (function() -- a list of ids: a table keyed by them would not cross to the window
+      local out = {}
+      for id in pairs(E.ignore) do out[#out + 1] = id end
+      return out
+    end)(),
+    fight_id = E.running and E.fight_id or 0,
     mode = S.mode,
     style = S.style,
     status = E.running and E.status or "Paused",
@@ -217,6 +278,24 @@ end)
 hs.ui_function("settings", function() load_settings() return S end)
 hs.ui_function("catalog", function() return catalog end)
 hs.ui_function("spells", function(refresh) return spell_names(refresh) end)
+hs.ui_function("row_for_spell", function(name)
+  if type(name) ~= "string" or name == "" then return nil end
+  return spell_row(mq.TLO.Spell(name), name)
+end)
+-- The items carried with a click effect (world.clickies), for the Items page; a list of tables, each with the
+-- click spell's id and name, cast time, recast and how long it still has to go.
+hs.ui_function("clickies", function() return world_mod.clickies() end)
+-- A starting Items row for a carried item, from its click spell (as Import spell bar's rows).
+hs.ui_function("row_for_item", function(name)
+  if type(name) ~= "string" or name == "" then return nil end
+  for _, it in ipairs(world_mod.clickies()) do
+    if it.name:lower() == name:lower() then
+      return settings_mod.row_for_spell({ kind = "item", name = it.name, spell = it.spell, beneficial = it.beneficial,
+        target_type = it.target_type, duration = it.duration, ae_range = it.ae_range })
+    end
+  end
+  return settings_mod.row({ kind = "item", name = name })
+end)
 hs.ui_function("set", function(path, value)
   local ok
   S, ok = settings_mod.set(S, path, value)
@@ -227,7 +306,7 @@ hs.ui_function("set", function(path, value)
   return ok
 end)
 hs.ui_function("set_rows", function(list, rows)
-  if list ~= "spells" and list ~= "abilities" then return false end
+  if list ~= "spells" and list ~= "abilities" and list ~= "items" then return false end
   S[list] = rows or {}
   S = settings_mod.repair(S)
   changed()
@@ -239,13 +318,21 @@ hs.ui_function("set_ignore", function(list)
   changed()
   return true
 end)
-hs.ui_function("command", function(what)
+hs.ui_function("command", function(what, arg)
   if what == "start" then start()
   elseif what == "pause" then pause()
   elseif what == "toggle" then if E.running then pause() else start() end
   elseif what == "close" then open = false
   elseif what == "settings" then settings_open = not settings_open
   elseif what == "close_settings" then settings_open = false
+  elseif what == "burn" then burn()
+  elseif what == "force" or what == "ignore" then
+    local id = tonumber(arg) or 0
+    local name
+    for _, x in ipairs(xt_list) do if x.id == id then name = x.name end end
+    if id ~= 0 then mark(what, id, name) end
+  elseif what == "target" then
+    if (tonumber(arg) or 0) ~= 0 then mq.cmd('/target id ' .. math.floor(tonumber(arg))) end
   elseif what == "camp" then set_camp()
   elseif what == "clear_camp" then S.hunter.camp = nil changed()
   elseif what == "import_autoskill" then return import_autoskill()
@@ -261,9 +348,13 @@ mq.bind('/autocombat', function(a, b)
   a = (a or ""):lower()
   if a == "" or a == "show" then open = not open
   elseif a == "settings" or a == "setup" then settings_open = not settings_open
+  elseif a == "force" or a == "ignore" then mark(a)
   elseif a == "on" or a == "start" then start()
   elseif a == "off" or a == "pause" or a == "stop" then pause()
   elseif a == "toggle" then if E.running then pause() else start() end
+  elseif a == "burn" then
+    local v = (b or ""):lower()
+    if v == "on" then burn(true) elseif v == "off" then burn(false) else burn() end
   elseif a == "camp" then set_camp()
   elseif a == "mode" or a == "style" then
     local list = a == "mode" and settings_mod.MODES or settings_mod.STYLES
@@ -277,9 +368,11 @@ mq.bind('/autocombat', function(a, b)
     if E.running and allowed()[S.mode] == false then pause("this server does not allow " .. S.mode .. " mode") end
     say(a .. " " .. v .. ".")
   elseif a == "status" then
-    say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "") .. ")")
+    say((E.running and E.status or "paused") .. " (" .. S.mode .. (S.mode == "manual" and (", " .. S.style) or "")
+      .. (E.burn and ", burning" or "") .. ")")
   else
-    say("/autocombat [show | settings | on | off | toggle | mode manual|hunter|assist | style full|partial | camp | status]")
+    say("/autocombat [show | settings | on | off | toggle | burn [on|off] | force | ignore"
+      .. " | mode manual|hunter|assist | style full|partial | camp | status]")
   end
 end)
 
@@ -293,15 +386,23 @@ while true do
     hs.hold_autoskill(want_hold)
     held = want_hold
   end
-  if E.running then
-    local w = world_mod.read(S, allowed())
+  local list, hater_ids = xtargets()
+  xt_list = list
+  engine.update_marks(E, hater_ids, alive, act)
+  local w = E.running and world_mod.read(S, allowed()) or nil
+  if E.burn and engine.burn_tick(E, w and #w.haters or world_mod.hater_count(), act) then
+    say("burn over: the extended target list is clear.")
+  end
+  if w then
+    w.burn = E.burn
+    w.me.burning = E.burn
     local ok, err = pcall(engine.tick, E, w, S, act)
     if not ok then
       pause("stopped by an error: " .. tostring(err))
     elseif settings_open and w.in_game and mq.gettime() - last_status > 500 then
       -- Why each row would not fire now, for the window.
       last_status = mq.gettime()
-      for _, list in ipairs({ "spells", "abilities" }) do
+      for _, list in ipairs(settings_mod.LISTS) do
         local out = {}
         for i, r in ipairs(S[list]) do out[i] = rules.blocker(list, i, r, w, E.memory) end
         row_status[list] = out

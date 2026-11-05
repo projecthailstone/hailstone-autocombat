@@ -1,13 +1,18 @@
 -- Auto Combat's windows for the Modern pack. The script (../../init.lua) keeps the settings and runs the fight; these
 -- show its state and edit the settings through the script's functions (eq.Plugin("autocombat"): state, settings,
--- set, set_rows, set_ignore, command, catalog, spells).
+-- set, set_rows, set_ignore, command, catalog, row_for_spell, clickies, row_for_item).
 --   The compact window (opens with the script; /autocombat, or the EQ menu's Plugins > Auto Combat): the mode (Manual,
 --           Hunter, Assist; one the server turned off is greyed) and Manual's style (Full, Partial), Start / Pause,
 --           what it is doing and the last thing it did. Its gear opens the settings.
 --   The settings window (/autocombat settings): a page list down the left.
---     Spells, Abilities: ordered rows; the first row that is ready and whose conditions hold fires. A row: what
---           (a memorized or book spell; an ability from the Ability Book), on whom, when, a recast, conditions.
---           The Now column says why a row is not firing.
+--     Spells, Abilities: the rotation, ordered rows as icon tiles (drag to reorder, a switch on each, a right-click
+--           menu); the first row that is ready and whose conditions hold fires. Each tile says why it is not firing
+--           while Auto Combat runs. The selected row at the right: its spell or ability as the books show it (icon,
+--           cost, cast, recast, range or reuse; Info opens the spell display), then on whom, when, a recast and the
+--           conditions. "+ Add" and "Change" pick from the spell book or the Ability Book (eq.SpellBook,
+--           eq.AbilityBook) as icon tiles, with a search and filters.
+--     Items: the same for the items carried with a click effect (worn or in a bag), picked from the ones the script
+--           finds (clickies); a tile shows the item's icon, the card its click spell, cast, recast and when it is ready.
 --     Targeting, Hunter, Assist, Rest, General: the other settings. Log: the last things it did.
 local hud = dofile("lib/hud.lua")
 local K = dofile("lib/dialogs_kit.lua")
@@ -20,9 +25,7 @@ local st = {}                    -- its state, read each frame
 local S = nil                    -- its settings, read again when they change (rev)
 local rev = -1
 local cat = nil                  -- the conditions' catalog
-local sel = { spells = nil, abilities = nil } -- the selected row of each page
-local pick = { spells = "", abilities = "" }   -- the name pickers' filter text
-local spellList, abilityList, abilityRead = nil, nil, -1
+local sel = { spells = nil, abilities = nil, items = nil } -- the selected row of each page
 local imported = {}               -- the last import's count, by page
 local describe                   -- a condition as words (below)
 
@@ -126,24 +129,162 @@ local function copy(t)
   return out
 end
 
--- ---------------------------------------------------------------- what can be put on a row
+-- ---------------------------------------------------------------- the books: what can be put on a row
+-- The Spell Book's and the Ability Book's own lists (eq.SpellBook, eq.AbilityBook), read again every two seconds:
+-- the picker shows them, and a row shows its spell's or ability's icon and numbers from them.
+local KINDS = { aa = "Alternate ability", disc = "Combat ability", skill = "Skill" }
+local KIND_SHORT = { aa = "AA", disc = "Combat", skill = "Skill" }
+local KIND_ORDER = { aa = 1, disc = 2, skill = 3 }
+local DOT = "  \xC2\xB7  "
 
-local function spells()
-  if not spellList and P then spellList = P.spells(false) or {} end
-  return spellList or {}
+-- Each page's words.
+local WORDS = {
+  spells = { kind = "spell", one = "spell", search = "Search spells", missing = "not in your book",
+    none = "No spells yet", hint = "Add one from your spell book, or import your spell bar.",
+    empty = "Your spell book is empty.", add = "+ Add spell", addTip = "Pick one from your spell book",
+    from = "spell from your spell book", gone = "Not in your spell book" },
+  abilities = { one = "ability", search = "Search abilities", missing = "not in the Ability Book",
+    none = "No abilities yet", hint = "Add one from the Ability Book, or import autoskill.",
+    empty = "You have no abilities to use yet.", add = "+ Add ability", addTip = "Pick one from the Ability Book",
+    from = "ability from the Ability Book", gone = "Not in your Ability Book" },
+  items = { kind = "item", one = "item", search = "Search items", missing = "not carried",
+    none = "No items yet", hint = "Add one you carry that has a click effect.",
+    empty = "You carry nothing with a click effect.", add = "+ Add item",
+    addTip = "Pick one you carry that has a click effect", from = "item you carry", gone = "Not carried" },
+}
+-- A row's kind on a page: the page's own, or (Abilities) the entry's.
+local function rowKind(list, x) return WORDS[list].kind or x.kind end
+
+local book = { spells = {}, abilities = {}, items = {}, byName = {}, byKey = {}, itemByName = {}, read = -1 }
+
+local function lower(t) return (t or ""):lower() end
+
+local function readBooks(force)
+  if not force and ui.GetTime() - book.read < 2 then return end
+  book.read = ui.GetTime()
+  book.spells, book.byName = {}, {}
+  for _, e in ipairs(eq.SpellBook() or {}) do
+    book.spells[#book.spells + 1] = e
+    book.byName[lower(e.name)] = e
+  end
+  table.sort(book.spells, function(a, b)
+    if a.level ~= b.level then return a.level > b.level end
+    return a.name < b.name
+  end)
+  book.abilities, book.byKey = {}, {}
+  for _, a in ipairs(eq.AbilityBook() or {}) do
+    if not a.passive then
+      book.abilities[#book.abilities + 1] = a
+      book.byKey[a.kind .. ":" .. lower(a.name)] = a
+    end
+  end
+  table.sort(book.abilities, function(a, b)
+    if a.kind ~= b.kind then return (KIND_ORDER[a.kind] or 9) < (KIND_ORDER[b.kind] or 9) end
+    return a.name < b.name
+  end)
+  -- The items carried with a click effect (the script's clickies: it reads the slots and bags), one per name; the
+  -- recast still to go shades the icon as an ability's reuse does.
+  book.items, book.itemByName = {}, {}
+  for _, it in ipairs((P and P.clickies()) or {}) do
+    local key = lower(it.name)
+    if not book.itemByName[key] then
+      it.item, it.remaining, it.reuse = true, it.ready_in, it.recast
+      book.items[#book.items + 1] = it
+      book.itemByName[key] = it
+    end
+  end
+  table.sort(book.items, function(a, b) return a.name < b.name end)
 end
 
--- The Ability Book's usable abilities (not passive), by kind.
-local function abilities()
-  if not abilityList or ui.GetTime() - abilityRead > 5 then
-    abilityRead = ui.GetTime()
-    abilityList = {}
-    for _, a in ipairs(eq.AbilityBook() or {}) do
-      if not a.passive then abilityList[#abilityList + 1] = { name = a.name, kind = a.kind } end
-    end
-    table.sort(abilityList, function(a, b) return a.name < b.name end)
+-- The book's entry for a row (nil: not in the book, or no longer).
+local function entryOf(list, r)
+  if list == "spells" then return book.byName[lower(r.name)] end
+  if list == "items" then return book.itemByName[lower(r.name)] end
+  return book.byKey[(r.kind or "") .. ":" .. lower(r.name)]
+end
+
+-- Seconds as "2.5s", "12s", "1m 30s"; 0 or less as "-".
+local function seconds(v)
+  v = tonumber(v) or 0
+  if v <= 0 then return "-" end
+  if v < 10 then return (string.format("%.1f", v):gsub("%.0$", "")) .. "s" end
+  if v < 60 then return string.format("%ds", math.floor(v + 0.5)) end
+  local m = math.floor(v / 60)
+  local r = math.floor(v - m * 60 + 0.5)
+  return r > 0 and string.format("%dm %ds", m, r) or string.format("%dm", m)
+end
+
+-- A spell, ability or item icon in a well, as the books draw it; an ability's reuse still to go shades it from the bottom.
+local function icon(e, name, x, y, size, s, ring, alpha)
+  alpha = alpha or 1
+  local tex, u0, v0, u1, v1
+  if e and e.icon and e.icon >= 0 then tex, u0, v0, u1, v1 = (e.item and eq.ItemIcon or eq.SpellIcon)(e.icon) end
+  T.Icon(x, y, size, s, tex, u0, v0, u1, v1, ring, { radius = 5, alpha = alpha })
+  if not tex then
+    local _, th = T.TextSize("Ag", T.font.small)
+    T.Text(x + size / 2, y + (size - th) / 2, (name ~= "" and name or "?"):sub(1, 2), C.muted, T.font.small, "center",
+      alpha)
   end
-  return abilityList
+  if e and (e.remaining or 0) > 0 and (e.reuse or 0) > 0 then
+    local f = math.min(1, e.remaining / e.reuse)
+    ui.DrawRectFilled(x, y + size * (1 - f), x + size, y + size, 0, 0, 0, 0.5 * alpha, 5 * s)
+  end
+end
+
+-- A small rounded label, right-aligned at xr; returns its width.
+local function pill(xr, y, text, col, s, alpha)
+  local tw, th = T.TextSize(text, T.font.tiny)
+  local x0 = xr - tw - 12 * s
+  ui.DrawRectFilled(x0, y, xr, y + th + 4 * s, col[1], col[2], col[3], 0.16 * (alpha or 1), (th + 4 * s) / 2)
+  T.Text(x0 + 6 * s, y + 2 * s, text, col, T.font.tiny, nil, alpha)
+  return tw + 12 * s
+end
+
+-- Burn mode's colour, and a small flame drawn in it.
+local BURN = { 1.0, 0.50, 0.14, 1 }
+
+local function flame(cx, cy, size, col, alpha)
+  local r = size * 0.32
+  ui.DrawCircleFilled(cx, cy + size * 0.18, r, col[1], col[2], col[3], alpha)
+  ui.DrawTriangleFilled(cx - r * 0.98, cy + size * 0.12, cx + r * 0.98, cy + size * 0.12, cx + size * 0.05,
+    cy - size * 0.5, col[1], col[2], col[3], alpha)
+end
+
+-- An on / off switch over a hit box drawn just before it.
+local function switch(x0, y0, x1, y1, on, hovered, s, alpha)
+  local rad = (y1 - y0) / 2
+  local a = on and C.accent or C.ink
+  ui.DrawRectFilled(x0, y0, x1, y1, a[1], a[2], a[3], (on and 0.75 or 0.16) * alpha, rad)
+  if hovered then ui.DrawRect(x0, y0, x1, y1, C.accent[1], C.accent[2], C.accent[3], 0.8 * alpha, rad, 1) end
+  local kx = on and (x1 - rad) or (x0 + rad)
+  ui.DrawCircleFilled(kx, (y0 + y1) / 2, rad - 2.5 * s, 1, 1, 1, (on and 0.95 or 0.6) * alpha)
+end
+
+-- A filter chip; returns clicked and its width.
+local function chip(id, x, y, text, on, s)
+  local tw = T.TextSize(text, T.font.small)
+  local w, h = tw + 18 * s, 24 * s
+  local clicked = T.Hit(id, x, y, x + w, y + h)
+  local hov = ui.IsItemHovered()
+  local a = C.accent
+  if on then
+    ui.DrawRectFilled(x, y, x + w, y + h, a[1], a[2], a[3], 0.22, h / 2)
+    ui.DrawRect(x, y, x + w, y + h, a[1], a[2], a[3], 0.7, h / 2, 1)
+  else
+    ui.DrawRectFilled(x, y, x + w, y + h, C.ink[1], C.ink[2], C.ink[3], hov and 0.08 or 0.04, h / 2)
+  end
+  local _, th = T.TextSize("Ag", T.font.small)
+  T.Text(x + w / 2, y + (h - th) / 2, text, (on or hov) and C.text or C.muted, T.font.small, "center")
+  return clicked, w
+end
+
+-- The cost of a spell or ability: "120 mana", "40 end", "-".
+local function cost(e)
+  if not e then return "-" end
+  local parts = {}
+  if (e.mana or 0) > 0 then parts[#parts + 1] = e.mana .. " mana" end
+  if (e.endurance or 0) > 0 then parts[#parts + 1] = e.endurance .. " end" end
+  return #parts > 0 and table.concat(parts, ", ") or "-"
 end
 
 -- ---------------------------------------------------------------- the rows
@@ -153,76 +294,329 @@ local function push(list, rows)
   S[list] = rows
 end
 
-local function namePicker(list, row, rows, s)
-  ui.SetNextItemWidth(260 * s)
-  local preview = row.name ~= "" and row.name or "(choose)"
-  if ui.BeginCombo("##acname" .. list, preview, ui.ComboFlags.HeightLarge) then
-    ui.SetNextItemWidth(-1)
-    pick[list] = ui.InputTextWithHint("##acfilter" .. list, "Filter", pick[list] or "", 64)
-    local f = (pick[list] or ""):lower()
-    if list == "spells" then
-      for _, e in ipairs(spells()) do
-        if f == "" or e.name:lower():find(f, 1, true) then
-          local text = e.gem > 0 and string.format("%s  (gem %d)", e.name, e.gem) or e.name
-          if ui.Selectable(text, e.name == row.name) then
-            row.name, row.kind = e.name, "spell"
-            push(list, rows)
-          end
-        end
+local function moveRow(list, rows, from, to)
+  if to < 1 or to > #rows or to == from then return end
+  local r = table.remove(rows, from)
+  table.insert(rows, to, r)
+  sel[list] = to
+  push(list, rows)
+end
+
+-- A row as one line: on whom, when, the recast and the conditions.
+local function summary(r)
+  local parts = { label(cat.targets, r.target), label(cat.phases, r.phase) }
+  if (r.recast or 0) > 0 then parts[#parts + 1] = "every " .. seconds(r.recast) .. (r.per_target and " each" or "") end
+  local n = #r.conditions
+  if n == 1 then parts[#parts + 1] = describe(r.conditions[1])
+  elseif n > 1 then parts[#parts + 1] = n .. " conditions" end
+  return table.concat(parts, DOT)
+end
+
+-- The picker: the spell book or the Ability Book as icon tiles, with a search and filter chips.
+local picker = { want = nil, replace = nil, search = "", filter = { spells = "all", abilities = "all", items = "all" } }
+local FILTERS = {
+  spells = { { "all", "All" }, { "gems", "Memorized" }, { "good", "Beneficial" }, { "bad", "Detrimental" } },
+  abilities = { { "all", "All" }, { "aa", "AAs" }, { "disc", "Combat" }, { "skill", "Skills" } },
+  items = { { "all", "All" }, { "worn", "Worn" }, { "packs", "Inventory" }, { "ready", "Ready" } },
+}
+
+local function matches(list, e, f, filter)
+  if list == "items" then
+    if f ~= "" and not lower(e.name):find(f, 1, true) and not lower(e.spell):find(f, 1, true) then return false end
+    if filter == "worn" then return e.worn end
+    if filter == "packs" then return not e.worn end
+    if filter == "ready" then return (e.ready_in or 0) == 0 end
+    return true
+  end
+  if f ~= "" and not lower(e.name):find(f, 1, true) and not lower(e.categoryName):find(f, 1, true)
+      and not lower(e.subcategoryName):find(f, 1, true) then
+    return false
+  end
+  if list == "spells" then
+    if filter == "gems" then return e.gem ~= nil end
+    if filter == "good" then return e.beneficial end
+    if filter == "bad" then return not e.beneficial end
+    return true
+  end
+  return filter == "all" or e.kind == filter
+end
+
+local function choose(list, rows, e)
+  local i = picker.replace
+  if i and rows[i] then
+    rows[i].name = e.name
+    rows[i].kind = rowKind(list, e)
+  else
+    local row = (list == "spells" and P.row_for_spell(e.name)) or (list == "items" and P.row_for_item(e.name)) or nil
+    if not row then
+      local mine = list == "abilities" and e.beneficial
+      row = { enabled = true, kind = rowKind(list, e), name = e.name,
+        target = mine and "self" or "enemy", phase = "combat", recast = 0, per_target = false, conditions = {} }
+    end
+    rows[#rows + 1] = row
+    sel[list] = #rows
+  end
+  push(list, rows)
+end
+
+local function pickerBody(list, rows, s)
+  local x, y = ui.GetCursorScreenPos()
+  local pw, ph = 580 * s, 420 * s
+  ui.SetNextItemWidth(210 * s)
+  picker.search = ui.InputTextWithHint("##acpicksearch", WORDS[list].search, picker.search, 64)
+  local fx = x + 220 * s
+  for _, f in ipairs(FILTERS[list]) do
+    local clicked, cw = chip("##acpf" .. f[1], fx, y, f[2], picker.filter[list] == f[1], s)
+    if clicked then picker.filter[list] = f[1] end
+    fx = fx + cw + 4 * s
+  end
+  ui.SetCursorScreenPos(x, y + 32 * s)
+  local inRotation = {}
+  for _, r in ipairs(rows) do inRotation[rowKind(list, r) .. ":" .. lower(r.name)] = true end
+  local f, filter = lower(picker.search), picker.filter[list]
+  local all = (list == "spells" and book.spells) or (list == "items" and book.items) or book.abilities
+  ui.BeginChild("##acpickgrid", pw, ph, false)
+  local cw = ui.GetContentRegionAvail()
+  local cellW, cellH = (cw - 6 * s) / 2, 44 * s
+  local _, th = T.TextSize("Ag", T.font.small)
+  local n, chosen = 0, nil
+  for _, e in ipairs(all) do
+    if matches(list, e, f, filter) then
+      if n % 2 == 1 then ui.SameLine(0, 6 * s) end
+      n = n + 1
+      local px, py = ui.GetCursorScreenPos()
+      if ui.InvisibleButton("##acpk" .. n, cellW, cellH) then chosen = e end
+      local hovered = ui.IsItemHovered()
+      local have = inRotation[rowKind(list, e) .. ":" .. lower(e.name)]
+      ui.DrawRectFilled(px, py, px + cellW, py + cellH, C.ink[1], C.ink[2], C.ink[3], hovered and 0.09 or 0.035, 6 * s)
+      if hovered then
+        ui.DrawRect(px, py, px + cellW, py + cellH, C.accent[1], C.accent[2], C.accent[3], 0.8, 6 * s, 1)
       end
-    else
-      for _, e in ipairs(abilities()) do
-        if f == "" or e.name:lower():find(f, 1, true) then
-          local text = string.format("%s  (%s)", e.name, cat and cat.kinds[e.kind] or e.kind)
-          if ui.Selectable(text, e.name == row.name and e.kind == row.kind) then
-            row.name, row.kind = e.name, e.kind
-            push(list, rows)
-          end
-        end
+      local isz = cellH - 8 * s
+      icon(e, e.name, px + 4 * s, py + 4 * s, isz, s, have and C.accent or nil)
+      local nx = px + isz + 12 * s
+      local room = px + cellW - nx - 8 * s
+      T.Text(nx, py + 5 * s, T.Fit(e.name, room, T.font.small), C.text, T.font.small)
+      local sub
+      if list == "items" then
+        sub = (e.spell ~= "" and e.spell or "?") .. DOT .. (e.worn and "worn" or "inventory")
+        if (e.ready_in or 0) > 0 then sub = sub .. DOT .. seconds(e.ready_in) end
+      elseif list == "spells" then
+        sub = "Level " .. e.level
+        if e.gem then sub = sub .. DOT .. "gem " .. (e.gem + 1) end
+        if (e.subcategoryName or "") ~= "" then sub = sub .. DOT .. e.subcategoryName end
+      else
+        sub = KIND_SHORT[e.kind] or e.kind
+        if (e.reuse or 0) > 0 then sub = sub .. DOT .. seconds(e.reuse) end
+      end
+      T.Text(nx, py + 7 * s + th, T.Fit(sub, room, T.font.tiny), C.faint, T.font.tiny)
+      if hovered then
+        ui.SetTooltip(e.name .. "\n" .. (e.item and ("Click: " .. e.spell) or cost(e)) .. (have and "\nAlready in the rotation" or "")
+          .. (picker.replace and "\nClick: put it on this row" or "\nClick: add it to the rotation"))
       end
     end
-    ui.EndCombo()
   end
+  if n == 0 then
+    T.Text(x + 8 * s, y + 44 * s, #all == 0 and WORDS[list].empty or "Nothing matches.", C.muted, T.font.small)
+  end
+  ui.EndChild()
+  if chosen then
+    choose(list, rows, chosen)
+    ui.CloseCurrentPopup()
+  end
+end
+
+-- The rotation: a tile for each row, in order; drag one to move it, click its switch to turn it on or off.
+local TILE_H = 52
+local drag = { list = nil, from = nil }
+
+local function rotation(list, rows, w, h, s)
+  ui.BeginChild("##aclist" .. list, w, h, false)
+  local status = (st.rows or {})[list] or {}
+  local x0, y0 = ui.GetCursorScreenPos()
+  local cw = ui.GetContentRegionAvail()
+  local pitch = (TILE_H + 6) * s
+  local tileH = TILE_H * s
+  local _, th = T.TextSize("Ag", T.font.small)
+  local _, hn = T.TextSize("Ag", T.font.normal)
+  local _, my = ui.GetMousePos()
+  local dragging = drag.list == list and drag.from ~= nil
+  local dropAt = dragging and math.max(1, math.min(#rows + 1, math.floor((my - y0) / pitch + 0.5) + 1)) or nil
+  local menuFor = nil
+  for i, r in ipairs(rows) do
+    local ty = y0 + (i - 1) * pitch
+    local tx1 = x0 + cw
+    local e = entryOf(list, r)
+    if T.Hit("##actile" .. i, x0, ty, tx1, ty + tileH) then sel[list] = i end
+    local hovered, active = ui.IsItemHovered(), ui.IsItemActive()
+    if ui.IsItemClicked(ui.Mouse.Right) then
+      sel[list] = i
+      menuFor = i
+      T.TakeRightClick()
+    end
+    if active and not dragging and ui.IsMouseDragging(ui.Mouse.Left) then drag.list, drag.from = list, i end
+    local swx1 = tx1 - 10 * s
+    local swx0, swy0 = swx1 - 30 * s, ty + 9 * s
+    local swy1 = swy0 + 16 * s
+    if T.Hit("##acon" .. i, swx0, swy0, swx1, swy1) then
+      r.enabled = not r.enabled
+      push(list, rows)
+    end
+    local swHover = ui.IsItemHovered()
+    if swHover then ui.SetTooltip(r.enabled and "On: click to skip this row" or "Off: click to use this row again") end
+
+    local alpha = (dragging and drag.from == i) and 0.35 or 1
+    local a = C.accent
+    if sel[list] == i then
+      ui.DrawRectFilled(x0, ty, tx1, ty + tileH, a[1], a[2], a[3], 0.16 * alpha, 7 * s)
+      ui.DrawRect(x0, ty, tx1, ty + tileH, a[1], a[2], a[3], 0.6 * alpha, 7 * s, 1)
+    else
+      ui.DrawRectFilled(x0, ty, tx1, ty + tileH, C.ink[1], C.ink[2], C.ink[3], (hovered and 0.075 or 0.035) * alpha,
+        7 * s)
+    end
+    local dim = (r.enabled and 1 or 0.45) * alpha
+    T.Text(x0 + 13 * s, ty + (tileH - th) / 2, tostring(i), C.faint, T.font.small, "center", alpha)
+    local isz = tileH - 14 * s
+    icon(e, r.name, x0 + 26 * s, ty + 7 * s, isz, s, nil, dim)
+    local nx = x0 + 26 * s + isz + 10 * s
+    local nameEnd = swx0 - 8 * s
+    if r.burn then
+      -- burn-only: a flame, lit while burn mode is on
+      local lit = st.burn and (0.6 + 0.4 * math.sin(ui.GetTime() * 7)) or 0.55
+      flame(swx0 - 14 * s, ty + 17 * s, 13 * s, BURN, lit * dim)
+      nameEnd = swx0 - 26 * s
+    end
+    T.Text(nx, ty + 7 * s, T.Fit(r.name, nameEnd - nx, T.font.normal), C.text, T.font.normal, nil, dim)
+    switch(swx0, swy0, swx1, swy1, r.enabled, swHover, s, alpha)
+    -- what it is doing now, at the right of the second line
+    local ly = ty + 9 * s + hn
+    local pw = 0
+    if not e then
+      pw = pill(swx1, ly, WORDS[list].missing, C.danger, s, alpha)
+    elseif st.running and r.enabled then
+      local why = status[i]
+      if why == "" then pw = pill(swx1, ly, "ready", C.good, s, alpha)
+      elseif why then pw = pill(swx1, ly, T.Fit(why, 120 * s, T.font.tiny), C.muted, s, alpha) end
+    end
+    T.Text(nx, ly, T.Fit(summary(r), swx1 - pw - nx - 8 * s, T.font.small), C.muted, T.font.small, nil, dim)
+    if hovered and not dragging and not swHover and #r.conditions > 0 then
+      local lines = { "Fires when:" }
+      for _, c in ipairs(r.conditions) do lines[#lines + 1] = "  " .. describe(c) end
+      ui.SetTooltip(table.concat(lines, "\n"))
+    end
+  end
+  if dragging then
+    local ly = y0 + (dropAt - 1) * pitch - 3 * s
+    ui.DrawLine(x0 + 4 * s, ly, x0 + cw - 4 * s, ly, C.accent[1], C.accent[2], C.accent[3], 1, 2.5 * s)
+    if not ui.IsMouseDown(ui.Mouse.Left) then
+      local from = drag.from
+      drag.list, drag.from = nil, nil
+      if rows[from] then moveRow(list, rows, from, dropAt > from and dropAt - 1 or dropAt) end
+    end
+  end
+  if #rows == 0 then
+    local _, hl = T.TextSize("Ag", T.font.large)
+    T.Text(x0 + cw / 2, y0 + 40 * s, WORDS[list].none, C.muted, T.font.large, "center")
+    T.Text(x0 + cw / 2, y0 + 48 * s + hl, WORDS[list].hint, C.faint, T.font.small, "center")
+  end
+  ui.SetCursorScreenPos(x0, y0 + math.max(#rows, 1) * pitch)
+  ui.Dummy(1, 1)
+
+  if menuFor then ui.OpenPopup("##acrowmenu") end
+  if ui.BeginPopup("##acrowmenu") then
+    local i = sel[list]
+    local r = i and rows[i]
+    if r then
+      if ui.MenuItem("Change " .. WORDS[list].one .. "...") then
+        picker.want, picker.replace = list, i
+      end
+      if ui.MenuItem(r.enabled and "Turn off" or "Turn on") then r.enabled = not r.enabled push(list, rows) end
+      ui.Separator()
+      if ui.MenuItem("Move to top", false, i > 1) then moveRow(list, rows, i, 1) end
+      if ui.MenuItem("Move up", false, i > 1) then moveRow(list, rows, i, i - 1) end
+      if ui.MenuItem("Move down", false, i < #rows) then moveRow(list, rows, i, i + 1) end
+      if ui.MenuItem("Move to bottom", false, i < #rows) then moveRow(list, rows, i, #rows) end
+      ui.Separator()
+      if ui.MenuItem("Duplicate") then
+        table.insert(rows, i + 1, copy(r))
+        sel[list] = i + 1
+        push(list, rows)
+      end
+      if ui.MenuItem("Remove") then
+        table.remove(rows, i)
+        sel[list] = nil
+        push(list, rows)
+      end
+    end
+    ui.EndPopup()
+  end
+  ui.EndChild()
+end
+
+-- A new condition on this property, with its defaults (catalog.condition_for, which the window cannot call).
+local function fresh(who, p)
+  local op = cat.ops[p.kind][1]
+  if p.kind == "count" then op = p.default == 0 and "<=" or ">=" end
+  return { who = who, what = p.id, op = op, value = p.default, radius = p.radius }
 end
 
 local function conditionEditor(list, row, rows, s)
   local remove = nil
+  local avail = ui.GetContentRegionAvail()
+  local gap = 4 * s
+  local wWho, wWhat, wOp = avail * 0.24, avail * 0.33, avail * 0.13
+  local wVal = avail - wWho - wWhat - wOp - 4 * gap - 24 * s
   for i, c in ipairs(row.conditions) do
     ui.PushID("accond" .. i)
-    local who = combo("##who", cat.subjects, c.who, 150 * s)
+    local who = combo("##who", cat.subjects, c.who, wWho)
     if who and who ~= c.who then
-      row.conditions[i] = { who = who }
-      local p = cat.properties[who][1]
-      row.conditions[i].what, row.conditions[i].op, row.conditions[i].value = p.id, cat.ops[p.kind][1], p.default
+      row.conditions[i] = fresh(who, cat.properties[who][1])
       push(list, rows)
     end
-    ui.SameLine()
+    ui.SameLine(0, gap)
     local props = cat.properties[c.who] or {}
-    local what = combo("##what", props, c.what, 190 * s)
+    local what = combo("##what", props, c.what, wWhat)
     local prop
     for _, p in ipairs(props) do if p.id == (what or c.what) then prop = p end end
     if what and what ~= c.what and prop then
-      c.what, c.op, c.value = what, cat.ops[prop.kind][1], prop.default
+      row.conditions[i] = fresh(c.who, prop)
+      c = row.conditions[i]
       push(list, rows)
     end
     if prop then
-      ui.SameLine()
+      ui.SameLine(0, gap)
       local ops = {}
       for _, o in ipairs(cat.ops[prop.kind]) do ops[#ops + 1] = { o, o } end
-      local op = combo("##op", ops, c.op, 70 * s)
+      local op = combo("##op", ops, c.op, prop.kind == "bool" and (wOp + wVal + gap) or wOp)
       if op then c.op = op push(list, rows) end
       if prop.kind == "buff" then
-        ui.SameLine()
-        ui.SetNextItemWidth(170 * s)
+        ui.SameLine(0, gap)
+        ui.SetNextItemWidth(wVal)
         local text, changed = ui.InputTextWithHint("##val", "buff name", c.value or "", 64)
         if changed then c.value = text push(list, rows) end
+      elseif prop.kind == "count" then
+        -- how many, and within what distance of the subject
+        ui.SameLine(0, gap)
+        local v = number("##val", c.value or 0, 40 * s, 0, 100)
+        if v then c.value = v push(list, rows) end
+        tip("How many mobs")
+        ui.SameLine(0, gap)
+        local cx, cy = ui.GetCursorPos()
+        ui.SetCursorPos(cx, cy + 3 * s)
+        caption("in")
+        ui.SameLine(0, gap)
+        ui.SetCursorPos(ui.GetCursorPos(), cy)
+        local rad = number("##rad", c.radius or prop.radius or 30, math.max(36 * s, wVal - 40 * s - T.TextSize("in", T.font.small) - 2 * gap), 1, 300)
+        if rad then c.radius = rad push(list, rows) end
+        tip("Within this distance of " .. (c.who == "me" and "you" or "the target")
+          .. " (a spell's AE range is in its Info window)")
       elseif prop.kind ~= "bool" then
-        ui.SameLine()
-        local v = number("##val", c.value or 0, 70 * s)
+        ui.SameLine(0, gap)
+        local v = number("##val", c.value or 0, wVal)
         if v then c.value = v push(list, rows) end
       end
     end
-    ui.SameLine()
+    ui.SameLine(0, gap)
     if ui.SmallButton("x") then remove = i end
     tip("Remove this condition")
     ui.PopID()
@@ -238,132 +632,172 @@ local function conditionEditor(list, row, rows, s)
   tip("Every condition must hold for the row to fire")
 end
 
-local function rowEditor(list, row, rows, s, index)
-  section(string.format("Row %d", index), s)
-  field(list == "spells" and "Spell" or "Ability", s, 90)
-  namePicker(list, row, rows, s)
-  ui.SameLine()
-  local on = check("Enabled##acen" .. list, row.enabled)
-  if on ~= nil then row.enabled = on push(list, rows) end
-  field("On", s, 90)
-  local to = combo("##acto" .. list, cat.targets, row.target, 170 * s)
-  if to then row.target = to push(list, rows) end
-  ui.SameLine()
-  local cx, cy = ui.GetCursorPos()
-  ui.SetCursorPos(cx + 8 * s, cy + 3 * s)
-  caption("When")
-  ui.SameLine()
-  ui.SetCursorPos(ui.GetCursorPos(), cy)
-  local ph = combo("##acph" .. list, cat.phases, row.phase, 140 * s)
-  if ph then row.phase = ph push(list, rows) end
-  field("Recast", s, 90)
-  local rc = number("##acrc" .. list, row.recast or 0, 60 * s, 0, 3600)
-  if rc then row.recast = rc push(list, rows) end
+-- The selected row: its spell or ability as the book shows it (icon, numbers), then what makes it fire.
+local function details(list, rows, x, y, w, h, s)
+  ui.SetCursorScreenPos(x, y)
+  ui.BeginChild("##acdetail" .. list, w, h, false)
+  local i = sel[list]
+  local r = i and rows[i]
+  local px, py = ui.GetCursorScreenPos()
+  local cw = ui.GetContentRegionAvail()
+  if not r then
+    if #rows > 0 then T.Text(px + 6 * s, py + 10 * s, "Select a row to see it and change it.", C.muted, T.font.small) end
+    ui.EndChild()
+    return
+  end
+  local e = entryOf(list, r)
+  -- the card
+  local cardH = 118 * s
+  ui.DrawRectFilled(px, py, px + cw, py + cardH, C.ink[1], C.ink[2], C.ink[3], 0.04, 8 * s)
+  ui.DrawRect(px, py, px + cw, py + cardH, C.ink[1], C.ink[2], C.ink[3], 0.08, 8 * s, 1)
+  local isz = 48 * s
+  icon(e, r.name, px + 10 * s, py + 10 * s, isz, s, C.accent)
+  local nx = px + isz + 20 * s
+  local bw = 70 * s
+  local infoId
+  if e and list == "spells" then infoId = e.id
+  elseif e and list == "items" then infoId = (e.spell_id or 0) > 0 and e.spell_id or nil
+  elseif e then infoId = (e.spell or 0) > 0 and e.spell or nil end
+  local bx1 = px + cw - 10 * s
+  if T.Button("##acchange", bx1 - bw, py + 10 * s, bx1, py + 34 * s, s, "Change", {
+        tooltip = "Pick another " .. WORDS[list].from }) then
+    picker.want, picker.replace = list, i
+  end
+  if infoId then
+    if T.Button("##acinfo", bx1 - 2 * bw - 6 * s, py + 10 * s, bx1 - bw - 6 * s, py + 34 * s, s, "Info",
+          { tooltip = list == "items" and "The click spell's display window" or "The spell's display window" }) then
+      eq.ShowSpell(infoId)
+    end
+  end
+  local room = bx1 - (infoId and (2 * bw + 6 * s) or bw) - nx - 8 * s
+  local _, hl = T.TextSize("Ag", T.font.large)
+  T.Text(nx, py + 10 * s, T.Fit(r.name, room, T.font.large), C.text, T.font.large)
+  local sub
+  if list == "items" then
+    if e then
+      sub = "Click: " .. (e.spell ~= "" and e.spell or "?") .. DOT
+        .. (e.worn and "worn" or (e.sub and "in a bag" or "in your inventory"))
+      if (e.req_level or 0) > 0 then sub = sub .. DOT .. "level " .. e.req_level end
+    else
+      sub = WORDS.items.gone
+    end
+  elseif list == "spells" then
+    if e then
+      sub = "Level " .. e.level
+      if (e.subcategoryName or "") ~= "" then sub = sub .. DOT .. e.subcategoryName end
+      sub = sub .. DOT .. (e.gem and ("gem " .. (e.gem + 1)) or "not memorized")
+    else
+      sub = "Not in your spell book"
+    end
+  else
+    sub = e and ((KINDS[e.kind] or e.kind) .. ((e.level or 0) > 0 and (DOT .. "level " .. e.level) or ""))
+      or "Not in your Ability Book"
+  end
+  T.Text(nx, py + 14 * s + hl, T.Fit(sub, room, T.font.small), (e and (list ~= "spells" or e.gem)) and C.muted or C.danger,
+    T.font.small)
+  local tiles
+  if list == "items" then
+    tiles = { { "Cast", e and (e.cast_time > 0 and seconds(e.cast_time / 1000) or "instant") or "-" },
+      { "Recast", e and seconds(e.recast) or "-" },
+      { "Ready", e and ((e.ready_in or 0) == 0 and "Now" or seconds(e.ready_in)) or "-" },
+      { "Range", e and (e.range > 0 and string.format("%.0f", e.range) or "self") or "-" } }
+  elseif list == "spells" then
+    tiles = { { "Cost", cost(e) }, { "Cast", e and seconds(e.castTime / 1000) or "-" },
+      { "Recast", e and seconds(e.recastTime / 1000) or "-" },
+      { "Range", e and (e.range > 0 and string.format("%.0f", e.range) or "self") or "-" } }
+  else
+    tiles = { { "Cost", cost(e) }, { "Reuse", e and seconds(e.reuse) or "-" },
+      { "Ready", e and (e.ready and "Now" or seconds(e.remaining)) or "-" } }
+  end
+  local ty = py + 66 * s
+  local tw = (cw - 20 * s - (#tiles - 1) * 6 * s) / #tiles
+  for k, t in ipairs(tiles) do
+    local tx = px + 10 * s + (k - 1) * (tw + 6 * s)
+    ui.DrawRectFilled(tx, ty, tx + tw, ty + 42 * s, C.inset[1], C.inset[2], C.inset[3], C.inset[4] * 0.8, 6 * s)
+    T.Text(tx + tw / 2, ty + 5 * s, t[1], C.faint, T.font.tiny, "center")
+    T.Text(tx + tw / 2, ty + 20 * s, T.Fit(t[2], tw - 6 * s, T.font.small), C.text, T.font.small, "center")
+  end
+
+  -- what makes it fire
+  ui.SetCursorScreenPos(px, py + cardH + 4 * s)
+  local col = 96
+  local wide = math.min(240 * s, cw - col * s)
+  section("Firing", s)
+  field("On", s, col)
+  local to = combo("##acto" .. list, cat.targets, r.target, wide)
+  if to then r.target = to push(list, rows) end
+  field("When", s, col)
+  local ph = combo("##acph" .. list, cat.phases, r.phase, wide)
+  if ph then r.phase = ph push(list, rows) end
+  field("Recast", s, col)
+  local rc = number("##acrc" .. list, r.recast or 0, 64 * s, 0, 3600)
+  if rc then r.recast = rc push(list, rows) end
   tip("Seconds before this row fires again (0: as soon as it is ready)")
   ui.SameLine()
-  local pt = check("for each target##acpt" .. list, row.per_target)
-  if pt ~= nil then row.per_target = pt push(list, rows) end
+  local pt = check("for each target##acpt" .. list, r.per_target)
+  if pt ~= nil then r.per_target = pt push(list, rows) end
   tip("Count the recast per fight target: a damage over time or a debuff, when the server does not send the target's buffs")
-  field("Conditions", s, 90)
-  if #row.conditions == 0 then ui.TextColored(C.faint[1], C.faint[2], C.faint[3], 1, "none: it fires whenever it is ready") end
-  if #row.conditions > 0 then ui.NewLine() end
-  conditionEditor(list, row, rows, s)
+  field("Burn", s, col)
+  local bu = check("Only during burn##acbu" .. list, r.burn)
+  if bu ~= nil then r.burn = bu push(list, rows) end
+  tip("Fires only while burn mode is on (the compact window's Burn, /autocombat burn): your big discs, AAs and nukes")
+  section("Conditions", s)
+  if #r.conditions == 0 then note("None: it fires whenever it is ready.") end
+  conditionEditor(list, r, rows, s)
+  ui.Dummy(0, 10 * s)
+  if ui.Button("Remove this row") then
+    table.remove(rows, i)
+    sel[list] = nil
+    push(list, rows)
+  end
+  ui.EndChild()
 end
 
 local function rowsPage(list, s, h)
+  readBooks(false)
   local rows = S[list]
-  local status = (st.rows or {})[list] or {}
-  local flags = ui.TableFlags.RowBg + ui.TableFlags.ScrollY + ui.TableFlags.SizingFixedFit + ui.TableFlags.BordersInnerV
-  local tableH = math.max(110 * s, h * 0.42)
-  if ui.BeginTable("##acrows" .. list, 7, flags, 0, tableH) then
-    ui.TableSetupColumn("#", ui.TableColumnFlags.WidthFixed, 24 * s)
-    ui.TableSetupColumn("On", ui.TableColumnFlags.WidthFixed, 30 * s)
-    ui.TableSetupColumn(list == "spells" and "Spell" or "Ability", ui.TableColumnFlags.WidthStretch, 0)
-    ui.TableSetupColumn("Target", ui.TableColumnFlags.WidthFixed, 110 * s)
-    ui.TableSetupColumn("When", ui.TableColumnFlags.WidthFixed, 100 * s)
-    ui.TableSetupColumn("Now", ui.TableColumnFlags.WidthFixed, 110 * s)
-    ui.TableSetupColumn("", ui.TableColumnFlags.WidthFixed, 70 * s)
-    ui.TableHeadersRow()
-    local move, remove = nil, nil
-    for i, r in ipairs(rows) do
-      ui.PushID("acrow" .. list .. i)
-      ui.TableNextRow()
-      ui.TableNextColumn()
-      if ui.Selectable(tostring(i), sel[list] == i, ui.SelectableFlags.SpanAllColumns) then sel[list] = i end
-      ui.TableNextColumn()
-      local on = check("##on", r.enabled)
-      if on ~= nil then r.enabled = on push(list, rows) end
-      ui.TableNextColumn()
-      ui.Text(r.name .. (list == "abilities" and ("  (" .. (cat.kinds[r.kind] or r.kind) .. ")") or ""))
-      if #r.conditions > 0 and ui.IsItemHovered() then
-        local lines = {}
-        for _, c in ipairs(r.conditions) do lines[#lines + 1] = describe(c) end
-        ui.SetTooltip(table.concat(lines, "\n"))
-      end
-      ui.TableNextColumn()
-      ui.Text(label(cat.targets, r.target))
-      ui.TableNextColumn()
-      ui.Text(label(cat.phases, r.phase))
-      ui.TableNextColumn()
-      local why = status[i]
-      if not st.running then ui.TextDisabled("-")
-      elseif why == "" then ui.TextColored(C.good[1], C.good[2], C.good[3], 1, "ready")
-      else ui.TextDisabled(why or "-") end
-      ui.TableNextColumn()
-      if ui.SmallButton("^") and i > 1 then move = { i, i - 1 } end
-      ui.SameLine()
-      if ui.SmallButton("v") and i < #rows then move = { i, i + 1 } end
-      ui.SameLine()
-      if ui.SmallButton("x") then remove = i end
-      ui.PopID()
-    end
-    ui.EndTable()
-    if #rows == 0 then
-      note(list == "spells" and "No spells yet. Import your spell bar, or add one and give it the conditions it fires on."
-        or "No abilities yet. Add one, or import the Ability Book's autoskill list.")
-    end
-    if move then
-      rows[move[1]], rows[move[2]] = rows[move[2]], rows[move[1]]
-      if sel[list] == move[1] then sel[list] = move[2] end
-      push(list, rows)
-    elseif remove then
-      table.remove(rows, remove)
-      sel[list] = nil
-      push(list, rows)
-    end
+  local x, y = ui.GetCursorScreenPos()
+  local w = ui.GetContentRegionAvail()
+  local spells = list == "spells"
+  -- the toolbar
+  local bh = 28 * s
+  local bx = x
+  if T.Button("##acadd" .. list, bx, y, bx + 112 * s, y + bh, s, WORDS[list].add,
+        { primary = true, tooltip = WORDS[list].addTip }) then
+    picker.want, picker.replace = list, nil
   end
-  if ui.Button("+ Add " .. (list == "spells" and "spell" or "ability")) then
-    rows[#rows + 1] = { enabled = true, kind = list == "spells" and "spell" or "skill", name = "", target = "enemy",
-      phase = "combat", recast = 0, per_target = false, conditions = {} }
-    sel[list] = #rows
-    S[list] = rows -- pushed once it has a name (a row without one is not kept)
+  bx = bx + 118 * s
+  if list ~= "items" and T.Button("##acimport" .. list, bx, y, bx + 128 * s, y + bh, s, spells and "Import spell bar" or "Import autoskill", {
+        tooltip = spells and ("Adds a row for each memorized spell, in gem order: harmful ones on the fight target in"
+          .. " combat, buffs on you when you lack them, heals on you under 60% health. Change them to suit.")
+          or "Adds the Ability Book's autoskill list here, with its conditions" }) then
+    imported[list] = P and P.command(spells and "import_spellbar" or "import_autoskill")
   end
-  if list == "abilities" then
-    ui.SameLine()
-    if ui.Button("Import from Autoskill") then imported.abilities = P and P.command("import_autoskill") end
-    tip("Adds the Ability Book's autoskill list here, with its conditions")
-    if imported[list] then
-      ui.SameLine()
-      ui.TextDisabled(imported[list] == 0 and "nothing new to add" or (imported[list] .. " added"))
-    end
-  else
-    ui.SameLine()
-    if ui.Button("Import spell bar") then imported.spells = P and P.command("import_spellbar") end
-    tip("Adds a row for each memorized spell, in gem order: harmful ones on the fight target in combat, buffs on you"
-      .. " when you lack them, heals on you under 60% health. Change them to suit.")
-    if imported[list] then
-      ui.SameLine()
-      ui.TextDisabled(imported[list] == 0 and "nothing new to add" or (imported[list] .. " added"))
-    end
-    ui.SameLine()
-    if ui.Button("Refresh spells") then spellList = P and P.spells(true) or nil end
-    tip("Read the memorized spells and the spell book again")
+  bx = bx + 136 * s
+  local _, th = T.TextSize("Ag", T.font.small)
+  if imported[list] then
+    T.Text(bx, y + (bh - th) / 2, imported[list] == 0 and "nothing new to add" or (imported[list] .. " added"), C.faint,
+      T.font.small)
   end
-  local r = sel[list] and rows[sel[list]]
-  if r then rowEditor(list, r, rows, s, sel[list])
-  elseif #rows > 0 then
-    ui.Dummy(0, 6 * s)
-    note("Select a row to edit it.")
+  if #rows > 1 then
+    T.Text(x + w, y + (bh - th) / 2, "first ready row fires; drag to reorder", C.faint, T.font.small, "right")
+  end
+  -- the rotation at the left, the selected row at the right
+  local top = y + bh + 10 * s
+  local bodyH = h - (top - y) - 4 * s
+  local listW = math.max(260 * s, math.floor(w * 0.44))
+  ui.SetCursorScreenPos(x, top)
+  rotation(list, rows, listW, bodyH, s)
+  details(list, rows, x + listW + 14 * s, top, w - listW - 14 * s, bodyH, s)
+  -- the picker
+  if picker.want == list then
+    picker.want, picker.search = nil, ""
+    readBooks(true)
+    ui.OpenPopup("##acpick" .. list)
+  end
+  if ui.BeginPopup("##acpick" .. list) then
+    pickerBody(list, rows, s)
+    ui.EndPopup()
   end
 end
 
@@ -623,6 +1057,85 @@ local function gearButton(id, x, y, size, s, lit)
   return clicked
 end
 
+-- ---------------------------------------------------------------- the extended target window
+-- The pack's extended target window (lib/xtarget.lua), covered by this one of the same name, with Force and Ignore on
+-- each mob: a forced mob gets a pulsing gold outline and FORCED, an ignored one is faded, struck through and IGNORED.
+-- An older client without lib/xtarget.lua keeps its own window.
+local FORCE = { 1.0, 0.78, 0.25, 1 }
+local MARK_W = 52 -- the buttons' part of a row (unscaled)
+
+-- A crosshair (force) or a circle with a bar through it (ignore), in a round button. Returns clicked.
+local function markButton(id, kind, x, y, size, s, on, tipText)
+  local clicked = T.Hit(id, x, y, x + size, y + size)
+  local hovered, active = ui.IsItemHovered(), ui.IsItemActive()
+  local col = kind == "force" and FORCE or C.danger
+  local cx, cy, r = x + size / 2, y + size / 2, size / 2
+  if on then
+    ui.DrawCircleFilled(cx, cy, r, col[1], col[2], col[3], active and 0.7 or 0.9)
+  else
+    ui.DrawCircleFilled(cx, cy, r, C.ink[1], C.ink[2], C.ink[3], active and 0.18 or (hovered and 0.12 or 0.06))
+    if hovered then ui.DrawCircle(cx, cy, r - 0.5 * s, col[1], col[2], col[3], 0.8, 1.2 * s) end
+  end
+  local ic = on and { 0.08, 0.08, 0.1, 1 } or (hovered and col or C.muted)
+  local ir = r * 0.48
+  if kind == "force" then
+    ui.DrawCircle(cx, cy, ir, ic[1], ic[2], ic[3], 1, 1.4 * s)
+    for _, d in ipairs({ { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+      ui.DrawLine(cx + d[1] * ir * 0.45, cy + d[2] * ir * 0.45, cx + d[1] * ir * 1.45, cy + d[2] * ir * 1.45,
+        ic[1], ic[2], ic[3], 1, 1.4 * s)
+    end
+  else
+    ui.DrawCircle(cx, cy, ir, ic[1], ic[2], ic[3], 1, 1.5 * s)
+    ui.DrawLine(cx - ir * 0.7, cy + ir * 0.7, cx + ir * 0.7, cy - ir * 0.7, ic[1], ic[2], ic[3], 1, 1.5 * s)
+  end
+  if hovered then ui.SetTooltip(tipText) end
+  return clicked
+end
+
+local xtOk, xtarget = pcall(dofile, "lib/xtarget.lua")
+if not xtOk or type(xtarget) ~= "table" or not xtarget.window then xtarget = nil end
+
+-- The mob in a slot (r.n, 0-based) and its marks, from the script's state.
+local function slotMob(r)
+  local x = (st.xtargets or {})[r.n + 1]
+  if not x or (x.id or 0) == 0 then return nil end
+  local ignored = false
+  for _, id in ipairs(st.ignored or {}) do if id == x.id then ignored = true end end
+  return x, st.force_id == x.id, ignored
+end
+
+local XT_ROW = {
+  width = MARK_W,
+  style = function(r)
+    local x, forced, ignored = slotMob(r)
+    if not x then return nil end
+    if forced then
+      local p = 0.55 + 0.45 * math.sin(ui.GetTime() * 5)
+      return { ring = { FORCE[1], FORCE[2], FORCE[3], 0.5 + 0.4 * p }, tag = { "FORCED", FORCE } }
+    end
+    if ignored then return { alpha = 0.45, strike = true, tag = { "IGNORED", C.muted } } end
+    return nil
+  end,
+  draw = function(r, x0, y0, x1, y1, s)
+    local x, forced, ignored = slotMob(r)
+    if not x then return end
+    local size = math.min(20 * s, y1 - y0 - 6 * s)
+    local by = (y0 + y1 - size) / 2
+    local fx = x1 - 6 * s - size
+    local ix = fx - 4 * s - size
+    if markButton("##acig" .. r.n, "ignore", ix, by, size, s, ignored, ignored
+          and "Ignored: click to fight it again"
+          or "Ignore: Auto Combat leaves it alone while anything else is on the list") then
+      P.command("ignore", x.id)
+    end
+    if markButton("##acfo" .. r.n, "force", fx, by, size, s, forced, forced
+          and "Forced: click to let Auto Combat choose again"
+          or "Force: Auto Combat fights this one first, until it dies") then
+      P.command("force", x.id)
+    end
+  end,
+}
+
 local STYLE_TIPS = {
   full = "It targets the mobs on you and keeps you in range",
   partial = "You pick the mob and stand where you want; it only turns you to face it",
@@ -633,9 +1146,43 @@ local MODE_TIPS = {
   assist = "It fights what your assist fights",
 }
 
--- The compact window: the mode, Start / Pause and what it is doing.
+-- The Burn button: lit and pulsing while burn mode is on. Returns clicked.
+local function burnButton(x0, y0, x1, y1, s, on)
+  local hit = T.Hit("##acburn", x0, y0, x1, y1)
+  local hovered, active = ui.IsItemHovered(), ui.IsItemActive()
+  local rad = 8 * s
+  local pulse = on and (0.5 + 0.5 * math.sin(ui.GetTime() * 7)) or 0
+  if on then
+    ui.DrawRectFilled(x0 - 4 * s, y0 - 4 * s, x1 + 4 * s, y1 + 4 * s, BURN[1], BURN[2], BURN[3], 0.10 + 0.30 * pulse,
+      rad + 4 * s)
+    local top, bottom = mix(BURN, { 1, 0.9, 0.5 }, 0.25 + 0.35 * pulse), mix(BURN, { 0.5, 0.05, 0 }, 0.35)
+    ui.DrawRectFilled(x0, y0 + 2 * s, x1, y1 + 2 * s, 0, 0, 0, 0.30, rad)
+    ui.DrawRectFilled(x0, y0, x1, y1, bottom[1], bottom[2], bottom[3], active and 0.8 or 0.95, rad)
+    ui.DrawRectFilled(x0, y0, x1, y0 + (y1 - y0) * 0.55, top[1], top[2], top[3], 0.9, rad)
+    ui.DrawRect(x0, y0, x1, y1, 1, 0.85, 0.5, 0.6 + 0.4 * pulse, rad, 1.5 * s)
+  else
+    ui.DrawRectFilled(x0, y0, x1, y1, BURN[1], BURN[2], BURN[3], active and 0.20 or (hovered and 0.14 or 0.07), rad)
+    ui.DrawRect(x0, y0, x1, y1, BURN[1], BURN[2], BURN[3], hovered and 0.8 or 0.45, rad, 1.2 * s)
+  end
+  local word = "Burn"
+  local tw, th = T.TextSize(word, T.font.normal)
+  local fw = 10 * s
+  local gx = (x0 + x1 - tw - fw - 5 * s) / 2
+  local cy = (y0 + y1) / 2
+  local ic = on and (C.barText or { 1, 1, 1, 1 }) or BURN
+  flame(gx + fw / 2, cy, 14 * s, ic, 1)
+  T.Text(gx + fw + 5 * s, cy - th / 2, word, ic, T.font.normal, nil, 1, on and C.barShadow or nil)
+  if hovered then
+    ui.SetTooltip(on and "Burn mode is on: the burn rows fire. It ends by itself once the extended target list is clear;"
+      .. " click to end it now (/autocombat burn off)."
+      or "Burn mode: rows marked \"Only during burn\" fire until this fight is over (/autocombat burn)")
+  end
+  return hit
+end
+
+-- The compact window: the mode, Start / Pause, Burn and what it is doing.
 local function compactSize(s)
-  return 340, S.mode == "manual" and 160 or 128
+  return 380, S.mode == "manual" and 160 or 128
 end
 
 local function compact(x, y, w, h, s)
@@ -648,6 +1195,13 @@ local function compact(x, y, w, h, s)
   if running then ui.DrawCircleFilled(x + pad + 4 * s, y + 15 * s, 7 * s, light[1], light[2], light[3], glow) end
   ui.DrawCircleFilled(x + pad + 4 * s, y + 15 * s, 4 * s, light[1], light[2], light[3], 1)
   T.Text(x + pad + 14 * s, y + 8 * s, "AUTO COMBAT", C.muted, T.font.small)
+  if st.burn then
+    local tw = T.TextSize("AUTO COMBAT", T.font.small)
+    local bx = x + pad + 24 * s + tw
+    local a = 0.55 + 0.45 * math.sin(t * 7)
+    flame(bx + 5 * s, y + 15 * s, 12 * s, BURN, a)
+    T.Text(bx + 13 * s, y + 8 * s, "BURNING", BURN, T.font.small, nil, a)
+  end
   if gearButton("##acgear", x + w - 44 * s, y + 4 * s, 18 * s, s, st.settings_open) then P.command("settings") end
 
   -- the mode, and Manual's style
@@ -693,9 +1247,11 @@ local function compact(x, y, w, h, s)
   T.Text(gx + iconW + 6 * s, cy - th / 2, word, ic, T.font.normal, nil, 1, C.barShadow)
   if hit then P.command(running and "pause" or "start") end
   if hovered then ui.SetTooltip(running and "Pause (/autocombat off)" or "Start (/autocombat on)") end
+  local kx0 = bx0 + bw + 8 * s
+  if burnButton(kx0, by0, kx0 + 76 * s, by0 + bh, s, st.burn) then P.command("burn") end
 
   -- the status and the last thing it did
-  local sx = bx0 + bw + 12 * s
+  local sx = kx0 + 76 * s + 12 * s
   local room = x + w - pad - sx
   local status = st.status or ""
   local sc = running and C.text or C.muted
@@ -713,6 +1269,7 @@ end
 local PAGES = {
   { "spells", "Spells", "Ordered rows: the first one that is ready and whose conditions all hold fires." },
   { "abilities", "Abilities", "Skills, combat abilities and alternate abilities, in the same way as spells." },
+  { "items", "Items", "Items you carry with a click effect (worn or in your bags), in the same way as spells." },
   { "targeting", "Targeting", "Which mobs it fights first, and which it may go after." },
   { "hunter", "Hunter", "Finding mobs on its own: roaming the zone, or pulling to a camp." },
   { "assist", "Assist", "Fighting what your assist fights." },
@@ -740,7 +1297,7 @@ local function sidebar(x, y, w, h, s)
     end
     local _, th = T.TextSize("Ag", T.font.normal)
     local text = p[2]
-    if p[1] == "spells" or p[1] == "abilities" then
+    if p[1] == "spells" or p[1] == "abilities" or p[1] == "items" then
       local n = #(S[p[1]] or {})
       if n > 0 then
         T.Text(x1 - 8 * s, yy + (rowH - th) / 2, tostring(n), C.faint, T.font.small, "right")
@@ -776,6 +1333,7 @@ local function settingsBody(x, y, w, h, s)
   ui.BeginChild("##acpagebody", cw, ch, false)
   if page == "spells" then rowsPage("spells", s, ch)
   elseif page == "abilities" then rowsPage("abilities", s, ch)
+  elseif page == "items" then rowsPage("items", s, ch)
   elseif page == "targeting" then targetingPage(s)
   elseif page == "hunter" then hunterPage(s)
   elseif page == "assist" then assistPage(s)
@@ -805,9 +1363,19 @@ ui.window("Auto Combat", function()
   hud.Dialog(SETTINGS_KEY, "Auto Combat Settings", {
     shown = st.settings_open == true,
     keepTitle = true,
-    size = function() return 820, 580 end,
-    resizable = { 680, 460 },
+    size = function() return 920, 600 end,
+    resizable = { 780, 480 },
     place = K.Centered,
     onClose = function() P.command("close_settings") end,
   }, settingsBody)
+end)
+
+-- The extended target window, with Force and Ignore on each mob (the pack's own when this client has no
+-- lib/xtarget.lua, or the script is not running).
+ui.window("Extended Target", function()
+  local p = eq.Plugin("autocombat")
+  if not xtarget or not p then return ui.base_window() end
+  P = p
+  st = p.state() or {}
+  xtarget.window({ width = 210 + MARK_W, row = XT_ROW })
 end)

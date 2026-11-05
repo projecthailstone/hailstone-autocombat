@@ -14,25 +14,68 @@ behind its gear button. It fights for you in one of three modes:
 ## The windows
 
 The compact window opens when the script starts. It has the mode (and Manual's Full or Partial), a Start / Pause
-button, and what Auto Combat is doing, with the last thing it did under it. Drag it by an empty spot; drag its
+button, the Burn button, and what Auto Combat is doing, with the last thing it did under it. Drag it by an empty spot; drag its
 bottom-right corner to scale it. The gear opens the settings window, a page list down the left: Spells, Abilities,
-Targeting, Hunter, Assist, Rest, General and Log.
+Items, Targeting, Hunter, Assist, Rest, General and Log.
+
+## Force and Ignore on the extended target window
+
+While Auto Combat runs, the Modern UI's extended target window gets two buttons on each mob:
+
+- **Force** (the crosshair): fight this one first, in every mode, until it dies. Click again to let Auto Combat
+  choose. A forced mob has a pulsing gold outline and FORCED after its name. Forcing one you ignored takes the
+  ignore off.
+- **Ignore** (the barred circle): leave this one alone while anything else is on the list. An ignored mob is faded,
+  struck through and marked IGNORED. Every ignore ends by itself once no mob you did not ignore is on the list, so a
+  fight never stalls on ignored mobs.
+
+`/autocombat force` and `/autocombat ignore` do the same for your current target. The buttons need a Hailstone
+client whose Modern UI has `lib/xtarget.lua`; an older one keeps its plain window, and the commands still work.
+
+## Burn mode
+
+The compact window's **Burn** button (or `/autocombat burn`) turns burn mode on: rows ticked **Only during burn**
+(your big discs, AAs and nukes) may fire as well as the others, and the button pulses while it is on. It ends by
+itself once your extended target list is clear after a fight; turned on before the pull, it waits for that fight.
+Click Burn again (or `/autocombat burn off`) to end it sooner. Pausing Auto Combat leaves it as it is. The condition
+"Me Burn mode on" (with "is not") keeps a row back while you burn, a cheap nuke to save mana for instance.
 
 ## The Spells and Abilities pages
 
 Each page is an ordered list of rows. Every moment, the first row that is ready and whose conditions all hold
 fires. A row has:
 
-- **What:** a spell (memorized, or from your spell book), or an ability from the Ability Book (a skill, a
-  combat ability or an alternate ability).
+- **What:** a spell (memorized, or from your spell book), an ability from the Ability Book (a skill, a
+  combat ability or an alternate ability), or on the Items page an item you carry with a click effect.
 - **On whom:** the mob you are fighting, you, your pet, the group member with the lowest health, or your assist.
 - **When:** in combat, out of combat, or any time.
 - **Recast:** seconds to wait before it fires again. Tick **for each target** to count the wait separately for
   each mob (useful for a damage-over-time spell or a debuff).
 - **Conditions:** for example "Me Health % < 50", "Target Health % > 20", "Me lacks Spirit of Wolf",
-  "Target is named", "Mobs on me >= 2". Every condition must hold.
+  "Target is named", "Mobs on me within 30 of the target >= 3". Every condition must hold.
 
-The **Now** column says why a row is not firing at the moment (not ready, out of range, conditions, recast ...).
+**Counting mobs, for AE spells and abilities.** Six conditions count mobs within a distance you set, of you (for a
+point-blank AE) or of the target (for a targeted AE); the distance is in three dimensions, as the server measures an
+AE's reach, and the spell's AE range is in its Info window:
+
+- *Mobs on me nearby* / *near it*: mobs on your extended target list, the target among them.
+- *NPCs nearby (any)* / *near it*: any live NPC that is not a pet.
+- *NPCs not on me nearby* / *near it*: the ones an AE would pull in; "<= 0" keeps it from making adds.
+
+For example "Mobs on me within 30 of the target >= 3" and "NPCs not on me within 30 of the target <= 0" on Rain of
+Fire. Import spell bar and + Add give an AE spell those two to start with, at its own AE range (a hatelist spell gets
+"Mobs on me >= 3").
+
+Each page shows the rotation as tiles, in the books' look: the spell's or ability's icon, its name, a line with on
+whom, when and its conditions, and a switch to turn the row off without losing it. Drag a tile to move it up or down
+the list, or right-click it (change, move, duplicate, remove). While Auto Combat runs, each tile says why it is not
+firing at the moment (not ready, out of range, conditions, recast ...); a row whose spell is no longer in your spell
+book is marked.
+
+The selected row shows at the right as the book shows it: its icon, level, cost, cast and recast time or reuse, and
+Info for the spell's own window; then on whom, when, the recast and the conditions. **+ Add** and **Change** open
+your spell book or the Ability Book as icon tiles to pick from, with a search and filters (memorized, beneficial,
+detrimental; AAs, combat abilities, skills). A spell added this way starts with the same guess as Import spell bar.
 
 **Import spell bar** on the Spells page adds a row for each memorized spell, in gem order, as a starting point to
 change: harmful spells on the fight target in combat, buffs on you when you lack them, heals on you under 60% health,
@@ -42,6 +85,24 @@ pet buffs on your pet again once they run out.
 While Auto Combat runs, autoskill waits; the Ability Book's autoskill button shows "On (held)" during that time.
 
 Spells must be memorized to be cast; Auto Combat does not memorize spells for you yet.
+
+## The Items page
+
+The Items page works as the Spells and Abilities pages do, for the items you carry that have a click effect: worn,
+in your inventory or in a bag. **+ Add item** lists them as icon tiles, with a search (by the item's name or its
+spell's) and the filters Worn, Inventory and Ready. A row takes an item's name, so it finds the item wherever it is
+in your bags, and has the same on whom, when, recast, burn and conditions as any row. A new row starts from the
+click spell, as Import spell bar's do: a buff on you when you lack it, a heal on you under 60% health, a harmful
+click on the fight target in combat.
+
+A row waits while its item is on its recast (the tile says how long), has no charges left, or is not carried; a
+click with a cast time waits while you move. An item is not clicked again within 3 seconds of its last click, so one
+the server refuses (an item that must be worn, a level you lack) is not clicked over and over. The card at the right
+shows the item's click spell, where it is, its cast time, recast, when it is ready and its range; Info opens the
+click spell's window.
+
+The Items page needs a Hailstone client whose `hailstone.item` gives the click's recast (`click_ready_in`); with an
+older one a row does not know its item's recast and only the 3-second gap holds it back.
 
 ## Installing
 
@@ -65,7 +126,9 @@ Settings are kept per server and character in `scripts/config/autocombat/`.
 |---|---|
 | `/autocombat` | show or hide the compact window |
 | `/autocombat settings` | show or hide the settings window |
+| `/autocombat force`, `ignore` | force or ignore your target (again: undo it) |
 | `/autocombat on`, `off`, `toggle` | start or pause |
+| `/autocombat burn [on\|off]` | burn mode on or off (no word: switch it) |
 | `/autocombat mode manual\|hunter\|assist` | change the mode |
 | `/autocombat style full\|partial` | change Manual's style |
 | `/autocombat camp` | set Hunter's camp where you stand |

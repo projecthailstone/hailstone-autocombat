@@ -261,3 +261,127 @@ case("engine: pause calls the pet back and turns off the attack Auto Combat star
   engine.pause(e2, io2)
   check(not io2.has("/pet back off") and not io2.has("/attack off"), "nothing to undo")
 end)
+
+case("engine: burn mode ends once the extended target list is clear after a fight", function()
+  local e = engine.new()
+  local io = fake.io()
+  engine.set_burn(e, true, io)
+  check(e.burn, "on")
+  check(not engine.burn_tick(e, 0, io), "on before the pull: it waits for a fight")
+  check(e.burn, "still on")
+  check(not engine.burn_tick(e, 2, io), "mobs on me")
+  check(not engine.burn_tick(e, 1, io), "one left")
+  check(engine.burn_tick(e, 0, io), "all gone: over")
+  check(not e.burn, "off")
+  check(not engine.burn_tick(e, 0, io), "stays off")
+  -- Turned off by hand mid-fight; on again forgets the last fight.
+  engine.set_burn(e, true, io)
+  engine.burn_tick(e, 3, io)
+  engine.set_burn(e, false, io)
+  check(not e.burn, "off by hand")
+  engine.set_burn(e, true, io)
+  check(not engine.burn_tick(e, 0, io), "a fresh burn waits for its own fight")
+  -- Pausing Auto Combat leaves it alone.
+  engine.start(e, io)
+  engine.pause(e, io)
+  check(e.burn, "pause keeps burn mode")
+end)
+
+case("engine: a forced mob is fought first in every mode until it dies; an ignored one is left alone", function()
+  local a = fake.spawn({ id = 9, name = "a gnoll", hp = 30 })
+  local b = fake.spawn({ id = 10, name = "a gnoll pup", hp = 90 })
+  local c = fake.spawn({ id = 11, name = "a gnoll scout", hp = 60 })
+  local s, e, io = setup({ targeting = { priority = "lowest_hp" } })
+  engine.tick(e, fake.world({ haters = { a, b, c } }), s, io)
+  check(io.has("/target id 9"), "lowest health first")
+  -- Force the healthiest one: it is fought now.
+  io.clear()
+  engine.force(e, 10, "a gnoll pup", io)
+  engine.tick(e, fake.world({ haters = { a, b, c }, target = a }), s, io)
+  check(io.has("/target id 10"), "the forced one")
+  -- Ignore it instead: the force goes; ignore the next best too: the third.
+  io.clear()
+  engine.ignore(e, 10, "a gnoll pup", io)
+  eq(e.force_id, 0, "ignoring the forced one unforces it")
+  engine.ignore(e, 9, "a gnoll", io)
+  engine.tick(e, fake.world({ haters = { a, b, c }, target = b }), s, io)
+  check(io.has("/target id 11"), "the one not ignored")
+  -- Forcing an ignored mob takes the ignore off.
+  engine.force(e, 9, "a gnoll", io)
+  check(not e.ignore[9], "unignored by force")
+  engine.force(e, 9, "a gnoll", io)
+  eq(e.force_id, 0, "force again: unforced")
+
+  -- Assist and Partial: the force wins over the assist's or the player's pick.
+  for _, mode in ipairs({ { mode = "assist" }, { mode = "manual", style = "partial" } }) do
+    local s2, e2, io2 = setup(mode)
+    engine.force(e2, 11, "a gnoll scout", io2)
+    engine.tick(e2, fake.world({ haters = { a, b, c }, target = a, assist = fake.spawn({ id = 70, pc = true, npc = false }),
+      me = { combat = true } }), s2, io2)
+    check(io2.has("/target id 11"), mode.mode .. ": the forced one")
+  end
+  -- Partial: an ignored target is not fought even when the player attacks it.
+  local s3, e3, io3 = setup({ mode = "manual", style = "partial" })
+  engine.ignore(e3, 9, "a gnoll", io3)
+  engine.tick(e3, fake.world({ haters = { a }, target = a, me = { combat = true } }), s3, io3)
+  eq(e3.fight_id, 0, "partial leaves the ignored target alone")
+end)
+
+case("engine: a force ends when its mob dies; ignores end when nothing else is on the list", function()
+  local e = engine.new()
+  local io = fake.io()
+  local living = { [9] = true, [10] = true, [11] = true }
+  local function alive(id) return living[id] == true end
+  engine.force(e, 9, "a gnoll", io)
+  engine.ignore(e, 10, "a pup", io)
+  engine.update_marks(e, { 9, 10, 11 }, alive, io)
+  eq(e.force_id, 9, "kept while it lives")
+  living[9] = nil
+  engine.update_marks(e, { 10, 11 }, alive, io)
+  eq(e.force_id, 0, "dead: the force is over")
+  check(e.ignore[10], "the ignore stays while 11 is on the list")
+  engine.update_marks(e, { 10 }, alive, io)
+  check(not e.ignore[10], "only the ignored one left: ignores cleared")
+  -- An ignored mob that dies is forgotten; one off the list is kept while others are on it.
+  engine.ignore(e, 10, "a pup", io)
+  engine.ignore(e, 11, "a scout", io)
+  living[11] = nil
+  engine.update_marks(e, { 10, 12 }, function(id) return id == 10 or id == 12 end, io)
+  check(e.ignore[10] and not e.ignore[11], "the dead one forgotten")
+  engine.update_marks(e, {}, function() return true end, io)
+  check(not e.ignore[10], "an empty list clears them")
+end)
+
+case("engine: an Items row clicks the item where it is (/useitem slot and bag place), on the fight target", function()
+  local s, e, io = setup({ items = { { name = "Wand of Testing", kind = "item", target = "enemy" } } })
+  local mob = fake.spawn({ id = 9, distance = 40 })
+  local w = fake.world({ haters = { mob }, target = mob, me = { combat = true },
+    items = { ["Wand of Testing"] = { slot = 24, sub = 3, cast_time = 0, range = 200 } } })
+  engine.tick(e, w, s, io)
+  check(io.has("/useitem 24 3"), "clicked in its bag: " .. table.concat(io.lines, "|"))
+  check(not io.has("/target id 1"), "no target change for the fight target")
+  eq(e.last, "Clicked Wand of Testing on mob9", "noted")
+  -- Not again within the item gap, though the server has not started its recast yet.
+  io.clear()
+  w.now = w.now + 1000
+  engine.tick(e, w, s, io)
+  check(not io.has("/useitem 24 3"), "not clicked again at once")
+  w.now = w.now + 3000
+  engine.tick(e, w, s, io)
+  check(io.has("/useitem 24 3"), "clicked again after the gap")
+end)
+
+case("engine: a worn click item on yourself mid-fight targets you and goes back; one on its recast waits", function()
+  local s, e, io = setup({ items = { { name = "Mask of Mending", kind = "item", target = "self", phase = "always",
+    conditions = { { who = "me", what = "hp", op = "<", value = 50 } } } } })
+  local mob = fake.spawn({ id = 9 })
+  local items = { ["Mask of Mending"] = { slot = 3, cast_time = 1500, range = 0, ready_in = 40 } }
+  local w = fake.world({ haters = { mob }, target = mob, me = { hp = 30, combat = true }, items = items })
+  engine.tick(e, w, s, io)
+  check(not io.has("/useitem 3"), "on its recast: waits")
+  items["Mask of Mending"].ready_in = 0
+  w.now = w.now + 5000
+  engine.tick(e, w, s, io)
+  local seq = table.concat(io.lines, "|")
+  check(seq:find("/attack off|/target id 1|/useitem 3|/target id 9|/attack on", 1, true) ~= nil, "sequence: " .. seq)
+end)
