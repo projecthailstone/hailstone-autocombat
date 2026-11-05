@@ -91,3 +91,24 @@ case("rules: a burn row fires only in burn mode; \"burn mode on\" is a condition
   eq(rules.next("spells", r, w, m), 1, "the burn row first in burn mode")
   eq(rules.blocker("spells", 2, r[2], w, m), "conditions", "the cheap one holds off while burning")
 end)
+
+case("rules: an Items row waits for the item to be carried, its recast, its charges, range and standing still", function()
+  local row = settings.row({ name = "Rod", kind = "item", target = "enemy" })
+  local mem = rules.new_memory()
+  local mob = fake.spawn({ id = 9, distance = 120 })
+  local w = fake.world({ target = mob, haters = { mob } })
+  w.fighting = true
+  eq(rules.blocker("items", 1, row, w, mem), "not carried", "not carried")
+  local rod = { slot = 25, ready_in = 12, range = 100, cast_time = 2000, charges = 0, max_charges = 5 }
+  w.item = function() return rod end
+  eq(rules.blocker("items", 1, row, w, mem), "ready in 12s", "recast")
+  rod.ready_in = 0
+  eq(rules.blocker("items", 1, row, w, mem), "no charges", "charges")
+  rod.charges = 2
+  eq(rules.blocker("items", 1, row, w, mem), "out of range", "range")
+  mob.distance = 50
+  w.me.moving = true
+  eq(rules.blocker("items", 1, row, w, mem), "moving", "a cast time: not while moving")
+  w.me.moving = false
+  eq(rules.blocker("items", 1, row, w, mem), "", "fires")
+end)

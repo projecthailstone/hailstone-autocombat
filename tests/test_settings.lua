@@ -115,3 +115,16 @@ case("settings: a count keeps its radius, clamped; an AE spell imports with the 
   local nuke = settings.row_for_spell({ name = "Flame Lick", beneficial = false, target_type = "Single" })
   eq(#nuke.conditions, 0, "a single-target spell gets none")
 end)
+
+case("settings: Items rows are kept; a starting row for a click item comes from its spell, lacking the spell's buff", function()
+  local s = settings.repair({ items = { { name = "Cloak of Flames", kind = "item", target = "self" }, { kind = "item" } } })
+  eq(#s.items, 1, "the nameless row dropped")
+  eq(s.items[1].kind, "item", "kind")
+  local r = settings.row_for_spell({ kind = "item", name = "Cloak of Flames", spell = "Flaming Sword of Xuzl",
+    beneficial = true, duration = 600 })
+  eq(r.kind, "item", "an item row")
+  eq(r.name, "Cloak of Flames", "named for the item")
+  eq(r.target, "self", "on me")
+  eq(r.conditions[1].value, "Flaming Sword of Xuzl", "when I lack the spell's buff")
+  eq(settings.repair({ hunter = { pull_kind = "item", pull_name = "x" } }).hunter.pull_kind, "", "no item pulls yet")
+end)

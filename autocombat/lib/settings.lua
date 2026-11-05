@@ -62,6 +62,7 @@ function M.defaults()
     },
     spells = {},
     abilities = {},
+    items = {},                   -- clicked items: a row's name is the item's
   }
 end
 
@@ -118,7 +119,9 @@ function M.condition(c)
   return out
 end
 
-M.ROW_KINDS = { "spell", "disc", "aa", "skill" }
+M.ROW_KINDS = { "spell", "disc", "aa", "skill", "item" }
+-- The pages of rows, in the order a tick tries them.
+M.LISTS = { "abilities", "spells", "items" }
 M.ROW_TARGETS = { "enemy", "self", "pet", "group", "assist" }
 M.ROW_PHASES = { "combat", "rest", "always" }
 
@@ -144,8 +147,9 @@ end
 
 -- A loaded (or edited) settings table made whole: defaults for what is missing or wrong.
 -- A Spells row for a memorized spell (Import spell bar), from what the spell is: info = { name, beneficial,
--- target_type (MQ's TargetType: "Self", "Single", "Pet" ...), duration (seconds, 0: none) }. A starting point the
--- player edits:
+-- target_type (MQ's TargetType: "Self", "Single", "Pet" ...), duration (seconds, 0: none) }; an Items row the same
+-- way from its click spell, with kind "item", the item's name and the spell's (`spell`, the buff it gives). A
+-- starting point the player edits:
 --   detrimental                  on the fight target, in combat
 --   beneficial on the pet        on my pet, any time, again once it has run out (the recast)
 --   beneficial with a duration   on me, any time, when I lack it
@@ -156,7 +160,7 @@ M.PB_AE = { ["PB AE"] = true, ["AE Undead"] = true, ["AE Summoned"] = true, ["Ca
 M.TARGET_AE = { ["Targeted AE"] = true, ["Targeted AE Tap"] = true, ["Free Target"] = true }
 
 function M.row_for_spell(info)
-  local r = { enabled = true, kind = "spell", name = info.name, target = "enemy", phase = "combat", recast = 0,
+  local r = { enabled = true, kind = info.kind or "spell", name = info.name, target = "enemy", phase = "combat", recast = 0,
     per_target = false, conditions = {} }
   if info.beneficial then
     r.phase = "always"
@@ -165,7 +169,7 @@ function M.row_for_spell(info)
       r.recast = math.max(0, math.min(3600, info.duration or 0))
     elseif (info.duration or 0) > 0 then
       r.target = "self"
-      r.conditions = { { who = "me", what = "buff", op = "lacks", value = info.name } }
+      r.conditions = { { who = "me", what = "buff", op = "lacks", value = info.spell or info.name } }
     else
       r.target = "self"
       r.conditions = { { who = "me", what = "hp", op = "<", value = 60 } }
@@ -212,8 +216,10 @@ function M.repair(given)
   if type(camp) == "table" and tonumber(camp.x) and tonumber(camp.y) and tonumber(camp.z) and type(camp.zone) == "string" then
     out.hunter.camp = { x = tonumber(camp.x), y = tonumber(camp.y), z = tonumber(camp.z), zone = camp.zone }
   end
-  if out.hunter.pull_kind ~= "" then out.hunter.pull_kind = one_of(out.hunter.pull_kind, M.ROW_KINDS, "") end
-  for _, list in ipairs({ "spells", "abilities" }) do
+  if out.hunter.pull_kind ~= "" then
+    out.hunter.pull_kind = one_of(out.hunter.pull_kind, { "spell", "disc", "aa", "skill" }, "") -- not an item yet
+  end
+  for _, list in ipairs(M.LISTS) do
     out[list] = {}
     for _, r in ipairs(type(given[list]) == "table" and given[list] or {}) do
       local ok = M.row(r)

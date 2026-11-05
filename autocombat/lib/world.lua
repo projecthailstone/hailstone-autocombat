@@ -1,7 +1,7 @@
 -- Auto Combat: the world as one tick sees it, read from the client (mq.TLO and the hailstone module) into plain
 -- tables for the pure parts (lib/conditions.lua, rules.lua, targeting.lua, engine.lua). Lookups that are not always
--- needed (a spawn by id, a spell, readiness, the hunt list, path lengths) are functions, read when asked and kept
--- for the tick.
+-- needed (a spawn by id, a spell, an item, readiness, the hunt list, path lengths) are functions, read when asked and
+-- kept for the tick.
 local mq = require('mq')
 local hs = require('hailstone')
 
@@ -143,6 +143,82 @@ local function group_tables(settings)
   return lowest, assist
 end
 
+-- ---------------------------------------------------------------- items with a click effect
+-- /useitem's slots: 0..22 worn, 23..32 the general slots (a bag's items by their place in it, from 0).
+local WORN_LAST, GENERAL_FIRST, GENERAL_LAST = 22, 23, 32
+
+-- Calls fn(item, slot, sub) for each item the player carries (worn, the general slots and their bags); stops when fn
+-- returns true.
+local function carried(fn)
+  for slot = 0, GENERAL_LAST do
+    local it = hs.item(slot)
+    if it then
+      if fn(it, slot, nil) then return end
+      if slot >= GENERAL_FIRST and (it.bag_slots or 0) > 0 then
+        for sub = 0, it.bag_slots - 1 do
+          local b = hs.item(slot, sub)
+          if b and fn(b, slot, sub) then return end
+        end
+      end
+    end
+  end
+end
+
+-- An item with a click effect as a table: where it is, its click spell (and what the spell is), cast time (ms),
+-- recast (s) and how long it still has to go, charges.
+local function click_table(it, slot, sub)
+  local sp = mq.TLO.Spell(it.click_spell)
+  local known = sp() ~= nil
+  return {
+    name = it.name, id = it.id, icon = it.icon, slot = slot, sub = sub, worn = slot <= WORN_LAST,
+    spell_id = it.click_spell, spell = known and (sp.Name() or "") or "",
+    cast_time = tonumber(it.click_cast_time) or 0, recast = tonumber(it.click_recast) or 0,
+    ready_in = tonumber(it.click_ready_in) or 0, level = tonumber(it.click_level) or 0,
+    req_level = tonumber(it.req_level) or 0, charges = tonumber(it.charges) or 0,
+    max_charges = tonumber(it.click_max_charges) or -1,
+    range = known and tonumber(sp.Range()) or 0, self_only = known and sp.TargetType() == "Self",
+    beneficial = known and sp.Beneficial() == true, target_type = known and (sp.TargetType() or "") or "",
+    duration = known and tonumber(sp.Duration.TotalSeconds()) or 0, ae_range = known and tonumber(sp.AERange()) or 0,
+  }
+end
+
+-- Every item the player carries with a click effect, for the Items page's picker.
+function M.clickies()
+  local out = {}
+  carried(function(it, slot, sub)
+    if (it.click_spell or 0) > 0 then out[#out + 1] = click_table(it, slot, sub) end
+  end)
+  return out
+end
+
+-- Where each item was found last (by lower-case name), and when one was last looked for and not found: an item
+-- that has moved is looked for again, one not carried at most every 2 s (a search reads every slot).
+local item_at, item_missed = {}, {}
+
+local function find_item(name, now)
+  local key = name:lower()
+  local at = item_at[key]
+  if at then
+    local it = hs.item(at[1], at[2])
+    if it and it.name:lower() == key and (it.click_spell or 0) > 0 then return click_table(it, at[1], at[2]) end
+    item_at[key] = nil
+  end
+  if item_missed[key] and now - item_missed[key] < 2000 then return nil end
+  local found
+  carried(function(it, slot, sub)
+    if (it.click_spell or 0) > 0 and it.name:lower() == key then
+      found = click_table(it, slot, sub)
+      return true
+    end
+  end)
+  if found then
+    item_at[key], item_missed[key] = { found.slot, found.sub }, nil
+  else
+    item_missed[key] = now
+  end
+  return found
+end
+
 -- The snapshot. `settings` (repaired) says which assist; `allowed` which modes the server lets run.
 function M.read(settings, allowed)
   local now = mq.gettime()
@@ -192,7 +268,21 @@ function M.read(settings, allowed)
     return t
   end
 
+  -- A carried item with a click effect, by name (nil: not carried, or no click).
+  local items = {}
+  function w.item(name)
+    if items[name] == nil then items[name] = find_item(name, now) or false end
+    return items[name] or nil
+  end
+
   function w.ready(row)
+    if row.kind == "item" then
+      local it = w.item(row.name)
+      if not it then return false, "not carried" end
+      if it.ready_in > 0 then return false, "ready in " .. it.ready_in .. "s" end
+      if it.max_charges > 0 and it.charges == 0 then return false, "no charges" end
+      return true
+    end
     if row.kind == "spell" then
       local s = w.spell(row.name)
       if not s then return false, "unknown spell" end

@@ -1,6 +1,6 @@
 -- Auto Combat's windows for the Modern pack. The script (../../init.lua) keeps the settings and runs the fight; these
 -- show its state and edit the settings through the script's functions (eq.Plugin("autocombat"): state, settings,
--- set, set_rows, set_ignore, command, catalog, row_for_spell).
+-- set, set_rows, set_ignore, command, catalog, row_for_spell, clickies, row_for_item).
 --   The compact window (opens with the script; /autocombat, or the EQ menu's Plugins > Auto Combat): the mode (Manual,
 --           Hunter, Assist; one the server turned off is greyed) and Manual's style (Full, Partial), Start / Pause,
 --           what it is doing and the last thing it did. Its gear opens the settings.
@@ -11,6 +11,8 @@
 --           cost, cast, recast, range or reuse; Info opens the spell display), then on whom, when, a recast and the
 --           conditions. "+ Add" and "Change" pick from the spell book or the Ability Book (eq.SpellBook,
 --           eq.AbilityBook) as icon tiles, with a search and filters.
+--     Items: the same for the items carried with a click effect (worn or in a bag), picked from the ones the script
+--           finds (clickies); a tile shows the item's icon, the card its click spell, cast, recast and when it is ready.
 --     Targeting, Hunter, Assist, Rest, General: the other settings. Log: the last things it did.
 local hud = dofile("lib/hud.lua")
 local K = dofile("lib/dialogs_kit.lua")
@@ -23,7 +25,7 @@ local st = {}                    -- its state, read each frame
 local S = nil                    -- its settings, read again when they change (rev)
 local rev = -1
 local cat = nil                  -- the conditions' catalog
-local sel = { spells = nil, abilities = nil } -- the selected row of each page
+local sel = { spells = nil, abilities = nil, items = nil } -- the selected row of each page
 local imported = {}               -- the last import's count, by page
 local describe                   -- a condition as words (below)
 
@@ -135,7 +137,25 @@ local KIND_SHORT = { aa = "AA", disc = "Combat", skill = "Skill" }
 local KIND_ORDER = { aa = 1, disc = 2, skill = 3 }
 local DOT = "  \xC2\xB7  "
 
-local book = { spells = {}, abilities = {}, byName = {}, byKey = {}, read = -1 }
+-- Each page's words.
+local WORDS = {
+  spells = { kind = "spell", one = "spell", search = "Search spells", missing = "not in your book",
+    none = "No spells yet", hint = "Add one from your spell book, or import your spell bar.",
+    empty = "Your spell book is empty.", add = "+ Add spell", addTip = "Pick one from your spell book",
+    from = "spell from your spell book", gone = "Not in your spell book" },
+  abilities = { one = "ability", search = "Search abilities", missing = "not in the Ability Book",
+    none = "No abilities yet", hint = "Add one from the Ability Book, or import autoskill.",
+    empty = "You have no abilities to use yet.", add = "+ Add ability", addTip = "Pick one from the Ability Book",
+    from = "ability from the Ability Book", gone = "Not in your Ability Book" },
+  items = { kind = "item", one = "item", search = "Search items", missing = "not carried",
+    none = "No items yet", hint = "Add one you carry that has a click effect.",
+    empty = "You carry nothing with a click effect.", add = "+ Add item",
+    addTip = "Pick one you carry that has a click effect", from = "item you carry", gone = "Not carried" },
+}
+-- A row's kind on a page: the page's own, or (Abilities) the entry's.
+local function rowKind(list, x) return WORDS[list].kind or x.kind end
+
+local book = { spells = {}, abilities = {}, items = {}, byName = {}, byKey = {}, itemByName = {}, read = -1 }
 
 local function lower(t) return (t or ""):lower() end
 
@@ -162,11 +182,24 @@ local function readBooks(force)
     if a.kind ~= b.kind then return (KIND_ORDER[a.kind] or 9) < (KIND_ORDER[b.kind] or 9) end
     return a.name < b.name
   end)
+  -- The items carried with a click effect (the script's clickies: it reads the slots and bags), one per name; the
+  -- recast still to go shades the icon as an ability's reuse does.
+  book.items, book.itemByName = {}, {}
+  for _, it in ipairs((P and P.clickies()) or {}) do
+    local key = lower(it.name)
+    if not book.itemByName[key] then
+      it.item, it.remaining, it.reuse = true, it.ready_in, it.recast
+      book.items[#book.items + 1] = it
+      book.itemByName[key] = it
+    end
+  end
+  table.sort(book.items, function(a, b) return a.name < b.name end)
 end
 
 -- The book's entry for a row (nil: not in the book, or no longer).
 local function entryOf(list, r)
   if list == "spells" then return book.byName[lower(r.name)] end
+  if list == "items" then return book.itemByName[lower(r.name)] end
   return book.byKey[(r.kind or "") .. ":" .. lower(r.name)]
 end
 
@@ -181,11 +214,11 @@ local function seconds(v)
   return r > 0 and string.format("%dm %ds", m, r) or string.format("%dm", m)
 end
 
--- A spell or ability icon in a well, as the books draw it; an ability's reuse still to go shades it from the bottom.
+-- A spell, ability or item icon in a well, as the books draw it; an ability's reuse still to go shades it from the bottom.
 local function icon(e, name, x, y, size, s, ring, alpha)
   alpha = alpha or 1
   local tex, u0, v0, u1, v1
-  if e and e.icon and e.icon >= 0 then tex, u0, v0, u1, v1 = eq.SpellIcon(e.icon) end
+  if e and e.icon and e.icon >= 0 then tex, u0, v0, u1, v1 = (e.item and eq.ItemIcon or eq.SpellIcon)(e.icon) end
   T.Icon(x, y, size, s, tex, u0, v0, u1, v1, ring, { radius = 5, alpha = alpha })
   if not tex then
     local _, th = T.TextSize("Ag", T.font.small)
@@ -280,13 +313,21 @@ local function summary(r)
 end
 
 -- The picker: the spell book or the Ability Book as icon tiles, with a search and filter chips.
-local picker = { want = nil, replace = nil, search = "", filter = { spells = "all", abilities = "all" } }
+local picker = { want = nil, replace = nil, search = "", filter = { spells = "all", abilities = "all", items = "all" } }
 local FILTERS = {
   spells = { { "all", "All" }, { "gems", "Memorized" }, { "good", "Beneficial" }, { "bad", "Detrimental" } },
   abilities = { { "all", "All" }, { "aa", "AAs" }, { "disc", "Combat" }, { "skill", "Skills" } },
+  items = { { "all", "All" }, { "worn", "Worn" }, { "packs", "Inventory" }, { "ready", "Ready" } },
 }
 
 local function matches(list, e, f, filter)
+  if list == "items" then
+    if f ~= "" and not lower(e.name):find(f, 1, true) and not lower(e.spell):find(f, 1, true) then return false end
+    if filter == "worn" then return e.worn end
+    if filter == "packs" then return not e.worn end
+    if filter == "ready" then return (e.ready_in or 0) == 0 end
+    return true
+  end
   if f ~= "" and not lower(e.name):find(f, 1, true) and not lower(e.categoryName):find(f, 1, true)
       and not lower(e.subcategoryName):find(f, 1, true) then
     return false
@@ -304,12 +345,12 @@ local function choose(list, rows, e)
   local i = picker.replace
   if i and rows[i] then
     rows[i].name = e.name
-    rows[i].kind = list == "spells" and "spell" or e.kind
+    rows[i].kind = rowKind(list, e)
   else
-    local row = list == "spells" and P.row_for_spell(e.name) or nil
+    local row = (list == "spells" and P.row_for_spell(e.name)) or (list == "items" and P.row_for_item(e.name)) or nil
     if not row then
       local mine = list == "abilities" and e.beneficial
-      row = { enabled = true, kind = list == "spells" and "spell" or e.kind, name = e.name,
+      row = { enabled = true, kind = rowKind(list, e), name = e.name,
         target = mine and "self" or "enemy", phase = "combat", recast = 0, per_target = false, conditions = {} }
     end
     rows[#rows + 1] = row
@@ -322,8 +363,7 @@ local function pickerBody(list, rows, s)
   local x, y = ui.GetCursorScreenPos()
   local pw, ph = 580 * s, 420 * s
   ui.SetNextItemWidth(210 * s)
-  picker.search = ui.InputTextWithHint("##acpicksearch", list == "spells" and "Search spells" or "Search abilities",
-    picker.search, 64)
+  picker.search = ui.InputTextWithHint("##acpicksearch", WORDS[list].search, picker.search, 64)
   local fx = x + 220 * s
   for _, f in ipairs(FILTERS[list]) do
     local clicked, cw = chip("##acpf" .. f[1], fx, y, f[2], picker.filter[list] == f[1], s)
@@ -332,9 +372,9 @@ local function pickerBody(list, rows, s)
   end
   ui.SetCursorScreenPos(x, y + 32 * s)
   local inRotation = {}
-  for _, r in ipairs(rows) do inRotation[(list == "spells" and "spell" or r.kind) .. ":" .. lower(r.name)] = true end
+  for _, r in ipairs(rows) do inRotation[rowKind(list, r) .. ":" .. lower(r.name)] = true end
   local f, filter = lower(picker.search), picker.filter[list]
-  local all = list == "spells" and book.spells or book.abilities
+  local all = (list == "spells" and book.spells) or (list == "items" and book.items) or book.abilities
   ui.BeginChild("##acpickgrid", pw, ph, false)
   local cw = ui.GetContentRegionAvail()
   local cellW, cellH = (cw - 6 * s) / 2, 44 * s
@@ -347,7 +387,7 @@ local function pickerBody(list, rows, s)
       local px, py = ui.GetCursorScreenPos()
       if ui.InvisibleButton("##acpk" .. n, cellW, cellH) then chosen = e end
       local hovered = ui.IsItemHovered()
-      local have = inRotation[(list == "spells" and "spell" or e.kind) .. ":" .. lower(e.name)]
+      local have = inRotation[rowKind(list, e) .. ":" .. lower(e.name)]
       ui.DrawRectFilled(px, py, px + cellW, py + cellH, C.ink[1], C.ink[2], C.ink[3], hovered and 0.09 or 0.035, 6 * s)
       if hovered then
         ui.DrawRect(px, py, px + cellW, py + cellH, C.accent[1], C.accent[2], C.accent[3], 0.8, 6 * s, 1)
@@ -358,7 +398,10 @@ local function pickerBody(list, rows, s)
       local room = px + cellW - nx - 8 * s
       T.Text(nx, py + 5 * s, T.Fit(e.name, room, T.font.small), C.text, T.font.small)
       local sub
-      if list == "spells" then
+      if list == "items" then
+        sub = (e.spell ~= "" and e.spell or "?") .. DOT .. (e.worn and "worn" or "inventory")
+        if (e.ready_in or 0) > 0 then sub = sub .. DOT .. seconds(e.ready_in) end
+      elseif list == "spells" then
         sub = "Level " .. e.level
         if e.gem then sub = sub .. DOT .. "gem " .. (e.gem + 1) end
         if (e.subcategoryName or "") ~= "" then sub = sub .. DOT .. e.subcategoryName end
@@ -368,14 +411,13 @@ local function pickerBody(list, rows, s)
       end
       T.Text(nx, py + 7 * s + th, T.Fit(sub, room, T.font.tiny), C.faint, T.font.tiny)
       if hovered then
-        ui.SetTooltip(e.name .. "\n" .. cost(e) .. (have and "\nAlready in the rotation" or "")
+        ui.SetTooltip(e.name .. "\n" .. (e.item and ("Click: " .. e.spell) or cost(e)) .. (have and "\nAlready in the rotation" or "")
           .. (picker.replace and "\nClick: put it on this row" or "\nClick: add it to the rotation"))
       end
     end
   end
   if n == 0 then
-    T.Text(x + 8 * s, y + 44 * s, #all == 0 and (list == "spells" and "Your spell book is empty."
-      or "You have no abilities to use yet.") or "Nothing matches.", C.muted, T.font.small)
+    T.Text(x + 8 * s, y + 44 * s, #all == 0 and WORDS[list].empty or "Nothing matches.", C.muted, T.font.small)
   end
   ui.EndChild()
   if chosen then
@@ -450,7 +492,7 @@ local function rotation(list, rows, w, h, s)
     local ly = ty + 9 * s + hn
     local pw = 0
     if not e then
-      pw = pill(swx1, ly, list == "spells" and "not in your book" or "not in the Ability Book", C.danger, s, alpha)
+      pw = pill(swx1, ly, WORDS[list].missing, C.danger, s, alpha)
     elseif st.running and r.enabled then
       local why = status[i]
       if why == "" then pw = pill(swx1, ly, "ready", C.good, s, alpha)
@@ -474,10 +516,8 @@ local function rotation(list, rows, w, h, s)
   end
   if #rows == 0 then
     local _, hl = T.TextSize("Ag", T.font.large)
-    T.Text(x0 + cw / 2, y0 + 40 * s, list == "spells" and "No spells yet" or "No abilities yet", C.muted, T.font.large,
-      "center")
-    T.Text(x0 + cw / 2, y0 + 48 * s + hl, list == "spells" and "Add one from your spell book, or import your spell bar."
-      or "Add one from the Ability Book, or import autoskill.", C.faint, T.font.small, "center")
+    T.Text(x0 + cw / 2, y0 + 40 * s, WORDS[list].none, C.muted, T.font.large, "center")
+    T.Text(x0 + cw / 2, y0 + 48 * s + hl, WORDS[list].hint, C.faint, T.font.small, "center")
   end
   ui.SetCursorScreenPos(x0, y0 + math.max(#rows, 1) * pitch)
   ui.Dummy(1, 1)
@@ -487,7 +527,7 @@ local function rotation(list, rows, w, h, s)
     local i = sel[list]
     local r = i and rows[i]
     if r then
-      if ui.MenuItem("Change " .. (list == "spells" and "spell" or "ability") .. "...") then
+      if ui.MenuItem("Change " .. WORDS[list].one .. "...") then
         picker.want, picker.replace = list, i
       end
       if ui.MenuItem(r.enabled and "Turn off" or "Turn on") then r.enabled = not r.enabled push(list, rows) end
@@ -614,15 +654,18 @@ local function details(list, rows, x, y, w, h, s)
   icon(e, r.name, px + 10 * s, py + 10 * s, isz, s, C.accent)
   local nx = px + isz + 20 * s
   local bw = 70 * s
-  local infoId = e and (list == "spells" and e.id or ((e.spell or 0) > 0 and e.spell)) or nil
+  local infoId
+  if e and list == "spells" then infoId = e.id
+  elseif e and list == "items" then infoId = (e.spell_id or 0) > 0 and e.spell_id or nil
+  elseif e then infoId = (e.spell or 0) > 0 and e.spell or nil end
   local bx1 = px + cw - 10 * s
   if T.Button("##acchange", bx1 - bw, py + 10 * s, bx1, py + 34 * s, s, "Change", {
-        tooltip = "Pick another " .. (list == "spells" and "spell from your spell book" or "ability from the Ability Book") }) then
+        tooltip = "Pick another " .. WORDS[list].from }) then
     picker.want, picker.replace = list, i
   end
   if infoId then
     if T.Button("##acinfo", bx1 - 2 * bw - 6 * s, py + 10 * s, bx1 - bw - 6 * s, py + 34 * s, s, "Info",
-          { tooltip = "The spell's display window" }) then
+          { tooltip = list == "items" and "The click spell's display window" or "The spell's display window" }) then
       eq.ShowSpell(infoId)
     end
   end
@@ -630,7 +673,15 @@ local function details(list, rows, x, y, w, h, s)
   local _, hl = T.TextSize("Ag", T.font.large)
   T.Text(nx, py + 10 * s, T.Fit(r.name, room, T.font.large), C.text, T.font.large)
   local sub
-  if list == "spells" then
+  if list == "items" then
+    if e then
+      sub = "Click: " .. (e.spell ~= "" and e.spell or "?") .. DOT
+        .. (e.worn and "worn" or (e.sub and "in a bag" or "in your inventory"))
+      if (e.req_level or 0) > 0 then sub = sub .. DOT .. "level " .. e.req_level end
+    else
+      sub = WORDS.items.gone
+    end
+  elseif list == "spells" then
     if e then
       sub = "Level " .. e.level
       if (e.subcategoryName or "") ~= "" then sub = sub .. DOT .. e.subcategoryName end
@@ -645,7 +696,12 @@ local function details(list, rows, x, y, w, h, s)
   T.Text(nx, py + 14 * s + hl, T.Fit(sub, room, T.font.small), (e and (list ~= "spells" or e.gem)) and C.muted or C.danger,
     T.font.small)
   local tiles
-  if list == "spells" then
+  if list == "items" then
+    tiles = { { "Cast", e and (e.cast_time > 0 and seconds(e.cast_time / 1000) or "instant") or "-" },
+      { "Recast", e and seconds(e.recast) or "-" },
+      { "Ready", e and ((e.ready_in or 0) == 0 and "Now" or seconds(e.ready_in)) or "-" },
+      { "Range", e and (e.range > 0 and string.format("%.0f", e.range) or "self") or "-" } }
+  elseif list == "spells" then
     tiles = { { "Cost", cost(e) }, { "Cast", e and seconds(e.castTime / 1000) or "-" },
       { "Recast", e and seconds(e.recastTime / 1000) or "-" },
       { "Range", e and (e.range > 0 and string.format("%.0f", e.range) or "self") or "-" } }
@@ -706,12 +762,12 @@ local function rowsPage(list, s, h)
   -- the toolbar
   local bh = 28 * s
   local bx = x
-  if T.Button("##acadd" .. list, bx, y, bx + 112 * s, y + bh, s, spells and "+ Add spell" or "+ Add ability",
-        { primary = true, tooltip = spells and "Pick one from your spell book" or "Pick one from the Ability Book" }) then
+  if T.Button("##acadd" .. list, bx, y, bx + 112 * s, y + bh, s, WORDS[list].add,
+        { primary = true, tooltip = WORDS[list].addTip }) then
     picker.want, picker.replace = list, nil
   end
   bx = bx + 118 * s
-  if T.Button("##acimport" .. list, bx, y, bx + 128 * s, y + bh, s, spells and "Import spell bar" or "Import autoskill", {
+  if list ~= "items" and T.Button("##acimport" .. list, bx, y, bx + 128 * s, y + bh, s, spells and "Import spell bar" or "Import autoskill", {
         tooltip = spells and ("Adds a row for each memorized spell, in gem order: harmful ones on the fight target in"
           .. " combat, buffs on you when you lack them, heals on you under 60% health. Change them to suit.")
           or "Adds the Ability Book's autoskill list here, with its conditions" }) then
@@ -1213,6 +1269,7 @@ end
 local PAGES = {
   { "spells", "Spells", "Ordered rows: the first one that is ready and whose conditions all hold fires." },
   { "abilities", "Abilities", "Skills, combat abilities and alternate abilities, in the same way as spells." },
+  { "items", "Items", "Items you carry with a click effect (worn or in your bags), in the same way as spells." },
   { "targeting", "Targeting", "Which mobs it fights first, and which it may go after." },
   { "hunter", "Hunter", "Finding mobs on its own: roaming the zone, or pulling to a camp." },
   { "assist", "Assist", "Fighting what your assist fights." },
@@ -1240,7 +1297,7 @@ local function sidebar(x, y, w, h, s)
     end
     local _, th = T.TextSize("Ag", T.font.normal)
     local text = p[2]
-    if p[1] == "spells" or p[1] == "abilities" then
+    if p[1] == "spells" or p[1] == "abilities" or p[1] == "items" then
       local n = #(S[p[1]] or {})
       if n > 0 then
         T.Text(x1 - 8 * s, yy + (rowH - th) / 2, tostring(n), C.faint, T.font.small, "right")
@@ -1276,6 +1333,7 @@ local function settingsBody(x, y, w, h, s)
   ui.BeginChild("##acpagebody", cw, ch, false)
   if page == "spells" then rowsPage("spells", s, ch)
   elseif page == "abilities" then rowsPage("abilities", s, ch)
+  elseif page == "items" then rowsPage("items", s, ch)
   elseif page == "targeting" then targetingPage(s)
   elseif page == "hunter" then hunterPage(s)
   elseif page == "assist" then assistPage(s)

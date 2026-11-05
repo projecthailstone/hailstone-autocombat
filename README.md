@@ -16,7 +16,7 @@ behind its gear button. It fights for you in one of three modes:
 The compact window opens when the script starts. It has the mode (and Manual's Full or Partial), a Start / Pause
 button, the Burn button, and what Auto Combat is doing, with the last thing it did under it. Drag it by an empty spot; drag its
 bottom-right corner to scale it. The gear opens the settings window, a page list down the left: Spells, Abilities,
-Targeting, Hunter, Assist, Rest, General and Log.
+Items, Targeting, Hunter, Assist, Rest, General and Log.
 
 ## Force and Ignore on the extended target window
 
@@ -45,8 +45,8 @@ Click Burn again (or `/autocombat burn off`) to end it sooner. Pausing Auto Comb
 Each page is an ordered list of rows. Every moment, the first row that is ready and whose conditions all hold
 fires. A row has:
 
-- **What:** a spell (memorized, or from your spell book), or an ability from the Ability Book (a skill, a
-  combat ability or an alternate ability).
+- **What:** a spell (memorized, or from your spell book), an ability from the Ability Book (a skill, a
+  combat ability or an alternate ability), or on the Items page an item you carry with a click effect.
 - **On whom:** the mob you are fighting, you, your pet, the group member with the lowest health, or your assist.
 - **When:** in combat, out of combat, or any time.
 - **Recast:** seconds to wait before it fires again. Tick **for each target** to count the wait separately for
@@ -85,6 +85,24 @@ pet buffs on your pet again once they run out.
 While Auto Combat runs, autoskill waits; the Ability Book's autoskill button shows "On (held)" during that time.
 
 Spells must be memorized to be cast; Auto Combat does not memorize spells for you yet.
+
+## The Items page
+
+The Items page works as the Spells and Abilities pages do, for the items you carry that have a click effect: worn,
+in your inventory or in a bag. **+ Add item** lists them as icon tiles, with a search (by the item's name or its
+spell's) and the filters Worn, Inventory and Ready. A row takes an item's name, so it finds the item wherever it is
+in your bags, and has the same on whom, when, recast, burn and conditions as any row. A new row starts from the
+click spell, as Import spell bar's do: a buff on you when you lack it, a heal on you under 60% health, a harmful
+click on the fight target in combat.
+
+A row waits while its item is on its recast (the tile says how long), has no charges left, or is not carried; a
+click with a cast time waits while you move. An item is not clicked again within 3 seconds of its last click, so one
+the server refuses (an item that must be worn, a level you lack) is not clicked over and over. The card at the right
+shows the item's click spell, where it is, its cast time, recast, when it is ready and its range; Info opens the
+click spell's window.
+
+The Items page needs a Hailstone client whose `hailstone.item` gives the click's recast (`click_ready_in`); with an
+older one a row does not know its item's recast and only the 3-second gap holds it back.
 
 ## Installing
 

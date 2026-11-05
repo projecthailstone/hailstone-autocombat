@@ -41,7 +41,7 @@ local open = true                   -- the compact window shows (from the start,
 local settings_open = false         -- the settings window shows
 local E = engine.new()
 local held = false                  -- autoskill held
-local row_status = { spells = {}, abilities = {} }
+local row_status = { spells = {}, abilities = {}, items = {} }
 local spell_cache = nil
 
 local function say(text) hs.chat('[Auto Combat] ' .. text, 15) end
@@ -282,6 +282,20 @@ hs.ui_function("row_for_spell", function(name)
   if type(name) ~= "string" or name == "" then return nil end
   return spell_row(mq.TLO.Spell(name), name)
 end)
+-- The items carried with a click effect (world.clickies), for the Items page; a list of tables, each with the
+-- click spell's id and name, cast time, recast and how long it still has to go.
+hs.ui_function("clickies", function() return world_mod.clickies() end)
+-- A starting Items row for a carried item, from its click spell (as Import spell bar's rows).
+hs.ui_function("row_for_item", function(name)
+  if type(name) ~= "string" or name == "" then return nil end
+  for _, it in ipairs(world_mod.clickies()) do
+    if it.name:lower() == name:lower() then
+      return settings_mod.row_for_spell({ kind = "item", name = it.name, spell = it.spell, beneficial = it.beneficial,
+        target_type = it.target_type, duration = it.duration, ae_range = it.ae_range })
+    end
+  end
+  return settings_mod.row({ kind = "item", name = name })
+end)
 hs.ui_function("set", function(path, value)
   local ok
   S, ok = settings_mod.set(S, path, value)
@@ -292,7 +306,7 @@ hs.ui_function("set", function(path, value)
   return ok
 end)
 hs.ui_function("set_rows", function(list, rows)
-  if list ~= "spells" and list ~= "abilities" then return false end
+  if list ~= "spells" and list ~= "abilities" and list ~= "items" then return false end
   S[list] = rows or {}
   S = settings_mod.repair(S)
   changed()
@@ -388,7 +402,7 @@ while true do
     elseif settings_open and w.in_game and mq.gettime() - last_status > 500 then
       -- Why each row would not fire now, for the window.
       last_status = mq.gettime()
-      for _, list in ipairs({ "spells", "abilities" }) do
+      for _, list in ipairs(settings_mod.LISTS) do
         local out = {}
         for i, r in ipairs(S[list]) do out[i] = rules.blocker(list, i, r, w, E.memory) end
         row_status[list] = out

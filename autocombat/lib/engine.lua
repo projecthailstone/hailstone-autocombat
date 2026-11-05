@@ -33,7 +33,7 @@ function M.new()
     sat = false,         -- Auto Combat sat the player down
     pet_sent = {},       -- fight targets the pet was sent on
     memory = rules.new_memory(),
-    last_action = { spells = -1e9, abilities = -1e9 },
+    last_action = { spells = -1e9, abilities = -1e9, items = -1e9 },
     last_face = -1e9,
     last_assist = -1e9,
     burn = false,        -- burn mode: the rows marked "only during burn" may fire (the player turns it on)
@@ -163,13 +163,14 @@ end
 
 -- ---------------------------------------------------------------- acting
 
--- A cast or an ability on `to` (a table from the snapshot with an id). A row for someone other than the fight
+-- A cast, an ability or an item's click on `to` (a table from the snapshot with an id). A row for someone other than the fight
 -- target targets them first and the fight target again after: attack off meanwhile, so it never swings at a
 -- friend.
 local function fire(e, list, i, row, to, world, io, s)
   local enemy = row.target == "enemy"
   local spell = row.kind == "spell" and world.spell(row.name) or nil
-  local self_only = spell and spell.self_only
+  local item = row.kind == "item" and world.item(row.name) or nil
+  local self_only = (spell and spell.self_only) or (item and item.self_only)
   local retarget = not enemy and not self_only and to.id ~= world.target_id
   local back, attack_back = world.target_id, false
   if retarget then
@@ -185,6 +186,10 @@ local function fire(e, list, i, row, to, world, io, s)
     io.cmd('/cast ' .. spell.gem)
     ok = true
     if retarget or (spell.cast_time or 0) > 0 then io.delay(1000, io.casting) end
+  elseif item then
+    io.cmd('/useitem ' .. item.slot .. (item.sub and (' ' .. item.sub) or ''))
+    ok = true
+    if retarget or (item.cast_time or 0) > 0 then io.delay(1000, io.casting) end
   else
     ok = io.use(row.kind, row.name)
   end
@@ -195,14 +200,15 @@ local function fire(e, list, i, row, to, world, io, s)
   if ok then
     rules.fired(list, i, row, e.memory, world.now, to.id)
     e.last_action[list] = world.now
-    note(e, string.format("%s %s on %s", row.kind == "spell" and "Cast" or "Used", row.name, to.name or "?"), io)
+    local verb = row.kind == "spell" and "Cast" or row.kind == "item" and "Clicked" or "Used"
+    note(e, string.format("%s %s on %s", verb, row.name, to.name or "?"), io)
   end
   return ok
 end
 
 -- Fires the first row that may fire from each page, each page held to the action gap.
 local function fire_rows(e, world, s, io)
-  for _, list in ipairs({ "abilities", "spells" }) do
+  for _, list in ipairs({ "abilities", "spells", "items" }) do
     if world.now - e.last_action[list] >= s.general.action_gap * 1000 then
       local i, row, to = rules.next(list, s[list], world, e.memory)
       if i then

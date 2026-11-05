@@ -18,7 +18,8 @@ end
 
 -- opts: me = {...}, target = spawn, haters = {spawns}, spells = {name = {...}}, ready = {kind:name = true},
 -- spawns = {spawns (by id)}, hunt = {spawns}, paths = {id = length}, pet, group, assist, now, allowed,
--- mesh = {loaded, complete, built, total}, npcs = {spawns} (the NPCs about, for the counts)
+-- mesh = {loaded, complete, built, total}, npcs = {spawns} (the NPCs about, for the counts),
+-- items = {name = {slot, sub, ready_in, cast_time, range, self_only, charges, max_charges}} (carried click items)
 function M.world(opts)
   opts = opts or {}
   local me = {
@@ -50,7 +51,15 @@ function M.world(opts)
   }
   function w.spawn(id) return by_id[id] end
   function w.spell(name) return (opts.spells or {})[name] end
+  function w.item(name) return (opts.items or {})[name] end
   function w.ready(row)
+    if row.kind == "item" then
+      local it = w.item(row.name)
+      if not it then return false, "not carried" end
+      if (it.ready_in or 0) > 0 then return false, "ready in " .. it.ready_in .. "s" end
+      if (it.max_charges or -1) > 0 and (it.charges or 0) == 0 then return false, "no charges" end
+      return true
+    end
     if row.kind == "spell" then
       local s = w.spell(row.name)
       if not s then return false, "unknown spell" end

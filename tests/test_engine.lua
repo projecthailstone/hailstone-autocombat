@@ -351,3 +351,37 @@ case("engine: a force ends when its mob dies; ignores end when nothing else is o
   engine.update_marks(e, {}, function() return true end, io)
   check(not e.ignore[10], "an empty list clears them")
 end)
+
+case("engine: an Items row clicks the item where it is (/useitem slot and bag place), on the fight target", function()
+  local s, e, io = setup({ items = { { name = "Wand of Testing", kind = "item", target = "enemy" } } })
+  local mob = fake.spawn({ id = 9, distance = 40 })
+  local w = fake.world({ haters = { mob }, target = mob, me = { combat = true },
+    items = { ["Wand of Testing"] = { slot = 24, sub = 3, cast_time = 0, range = 200 } } })
+  engine.tick(e, w, s, io)
+  check(io.has("/useitem 24 3"), "clicked in its bag: " .. table.concat(io.lines, "|"))
+  check(not io.has("/target id 1"), "no target change for the fight target")
+  eq(e.last, "Clicked Wand of Testing on mob9", "noted")
+  -- Not again within the item gap, though the server has not started its recast yet.
+  io.clear()
+  w.now = w.now + 1000
+  engine.tick(e, w, s, io)
+  check(not io.has("/useitem 24 3"), "not clicked again at once")
+  w.now = w.now + 3000
+  engine.tick(e, w, s, io)
+  check(io.has("/useitem 24 3"), "clicked again after the gap")
+end)
+
+case("engine: a worn click item on yourself mid-fight targets you and goes back; one on its recast waits", function()
+  local s, e, io = setup({ items = { { name = "Mask of Mending", kind = "item", target = "self", phase = "always",
+    conditions = { { who = "me", what = "hp", op = "<", value = 50 } } } } })
+  local mob = fake.spawn({ id = 9 })
+  local items = { ["Mask of Mending"] = { slot = 3, cast_time = 1500, range = 0, ready_in = 40 } }
+  local w = fake.world({ haters = { mob }, target = mob, me = { hp = 30, combat = true }, items = items })
+  engine.tick(e, w, s, io)
+  check(not io.has("/useitem 3"), "on its recast: waits")
+  items["Mask of Mending"].ready_in = 0
+  w.now = w.now + 5000
+  engine.tick(e, w, s, io)
+  local seq = table.concat(io.lines, "|")
+  check(seq:find("/attack off|/target id 1|/useitem 3|/target id 9|/attack on", 1, true) ~= nil, "sequence: " .. seq)
+end)
