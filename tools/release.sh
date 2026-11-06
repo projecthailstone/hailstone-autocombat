@@ -13,7 +13,7 @@
 set -euo pipefail
 
 NAME=autocombat
-CAPS=read,target,actions,move,ui # README "For server owners"
+CAPS=read,commands,target,actions,move,ui # README "For server owners"
 RELEASE_REPO=projecthailstone/hailstone-autocombat
 DESCRIPTION="A combat helper: Manual, Hunter and Assist modes with your own spell and ability rows."
 AUTHOR="Project Hailstone"

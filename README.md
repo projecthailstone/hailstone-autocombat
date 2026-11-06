@@ -153,8 +153,8 @@ health falls below the mark you set on the Rest page, or when the server does no
 ## For server owners
 
 Auto Combat is an ordinary player script, so your `hailstone.cfg` decides whether it runs at all
-(`[scripts] player = on` and the capabilities in `player_caps`). It needs `read`, `target`, `actions`, `move` and
-`ui`.
+(`[scripts] player = on` and the capabilities in `player_caps`). It needs `read`, `commands` (for its `/autocombat`
+command and `/pet`), `target`, `actions`, `move` and `ui`.
 
 You can also turn single modes off:
 
