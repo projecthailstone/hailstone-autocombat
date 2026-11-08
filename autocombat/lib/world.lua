@@ -311,14 +311,21 @@ function M.read(settings, allowed)
     total = tonumber(nav.TilesTotal()) or 0,
   }
 
-  -- The live NPCs within 400 of me, not pets, for the count conditions (read once a tick, when asked).
+  -- What the game itself lets a player target: the Targetable flag on and body type not 11 (EQEmu's NoTarget, which
+  -- servers give portal and trigger NPCs such as Project Triune's #TPTriggerN). Spawn.Targetable is the flag alone.
+  local function targetable(s)
+    return s.Targetable() ~= false and tonumber(s.BodyType()) ~= 11
+  end
+
+  -- The live NPCs within 400 of me, not pets and not untargetable ones, for the count conditions (read once a tick,
+  -- when asked).
   local npcs
   function w.npcs()
     if not npcs then
       npcs = {}
       local list = mq.getFilteredSpawns(function(s)
         return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and (tonumber(s.Distance3D()) or 9999) <= 400
-          and not owned(s)
+          and targetable(s) and not owned(s)
       end)
       for _, s in ipairs(list) do
         npcs[#npcs + 1] = { id = s.ID(), x = tonumber(s.X()) or 0, y = tonumber(s.Y()) or 0, z = tonumber(s.Z()) or 0,
@@ -337,7 +344,7 @@ function M.read(settings, allowed)
     end
     local out = {}
     local list = mq.getFilteredSpawns(function(s)
-      return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and s.Targetable() ~= false and not owned(s)
+      return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and targetable(s) and not owned(s)
     end)
     for _, s in ipairs(list) do
       local x = spawn_table(s)
