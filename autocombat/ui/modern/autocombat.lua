@@ -84,7 +84,9 @@ end
 
 local function check(text, value)
   local v, changed = ui.Checkbox(text, value)
-  return changed and v or nil
+  -- not `changed and v or nil`: that turns an unticked box (false) into nil, so a box could never be cleared
+  if changed then return v end
+  return nil
 end
 
 local function caption(text) K.Caption(text) end
