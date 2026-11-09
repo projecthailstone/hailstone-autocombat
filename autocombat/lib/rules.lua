@@ -68,12 +68,47 @@ function M.blocker(list, i, row, world, memory)
   return ""
 end
 
+-- The skills on the one combat-skill timer: using any of them makes them all wait (the original's
+-- GetCombatSkillTimerIndex, EQEmu's pTimerCombatAbility). On RoF2 Tiger Claw has a timer of its own, so it is not here.
+M.SHARED_TIMER = {
+  ["backstab"] = true, ["bash"] = true, ["slam"] = true, ["kick"] = true, ["round kick"] = true,
+  ["flying kick"] = true, ["eagle strike"] = true, ["dragon punch"] = true, ["tail rake"] = true, ["frenzy"] = true,
+}
+
+function M.shares_timer(row)
+  return row.kind == "skill" and M.SHARED_TIMER[(row.name or ""):lower()] == true
+end
+
 -- The first row of `rows` that may fire: index, row, recipient; nil when none.
+-- Rows on the shared combat-skill timer are always ready at the same moment, so the higher one would take every turn
+-- and the ones below it would never fire. When the first row that may fire is one of them, the one of them that may
+-- fire and was tried longest ago goes instead (never tried first, then the higher): they take turns.
 function M.next(list, rows, world, memory)
   for i, row in ipairs(rows) do
-    if M.blocker(list, i, row, world, memory) == "" then return i, row, M.recipient(row, world) end
+    if M.blocker(list, i, row, world, memory) == "" then
+      if M.shares_timer(row) then
+        local tried = memory.tried or {}
+        local best_i, best, best_at = i, row, tried[key(list, i, row)] or -math.huge
+        for j = i + 1, #rows do
+          local r = rows[j]
+          if M.shares_timer(r) and M.blocker(list, j, r, world, memory) == "" then
+            local at = tried[key(list, j, r)] or -math.huge
+            if at < best_at then best_i, best, best_at = j, r, at end
+          end
+        end
+        return best_i, best, M.recipient(best, world)
+      end
+      return i, row, M.recipient(row, world)
+    end
   end
   return nil
+end
+
+-- Note that a row was tried at `now`, whether or not the game took it: a row the game refuses (Backstab without a
+-- piercer) would otherwise keep the shared timer's turn for ever.
+function M.tried(list, i, row, memory, now)
+  memory.tried = memory.tried or {}
+  memory.tried[key(list, i, row)] = now
 end
 
 -- Note that a row fired at `now` on `target_id`.
@@ -84,7 +119,7 @@ function M.fired(list, i, row, memory, now, target_id)
   memory.per_target[k][target_id or 0] = now
 end
 
-function M.new_memory() return { last = {}, per_target = {} } end
+function M.new_memory() return { last = {}, per_target = {}, tried = {} } end
 
 -- A new fight forgets the per-target recasts of mobs that are gone (kept small).
 function M.forget_targets(memory, alive)
