@@ -112,3 +112,59 @@ case("rules: an Items row waits for the item to be carried, its recast, its char
   w.me.moving = false
   eq(rules.blocker("items", 1, row, w, mem), "", "fires")
 end)
+
+case("rules: rows on the shared combat-skill timer take turns; the others keep their order", function()
+  local r = settings.repair({ abilities = {
+    { name = "Backstab", kind = "skill", target = "enemy" },
+    { name = "Disarm", kind = "skill", target = "enemy" },
+    { name = "Bash", kind = "skill", target = "enemy" },
+  } }).abilities
+  local mob = fake.spawn({ id = 9 })
+  local w = fake.world({ target = mob, haters = { mob },
+    ready = { ["skill:Backstab"] = true, ["skill:Bash"] = true } })
+  w.fighting = true
+  local m = rules.new_memory()
+  local i = rules.next("abilities", r, w, m)
+  eq(i, 1, "Backstab first: neither tried yet, the higher goes")
+  rules.tried("abilities", i, r[i], m, w.now)
+  w.now = w.now + 10000
+  i = rules.next("abilities", r, w, m)
+  eq(i, 3, "then Bash, which shares the timer")
+  rules.tried("abilities", i, r[i], m, w.now)
+  w.now = w.now + 10000
+  eq(rules.next("abilities", r, w, m), 1, "then Backstab again")
+  -- The turns hold the place of the highest of them: a row with a timer of its own below it waits, one above goes first.
+  w = fake.world({ target = mob, haters = { mob },
+    ready = { ["skill:Backstab"] = true, ["skill:Bash"] = true, ["skill:Disarm"] = true }, now = w.now })
+  w.fighting = true
+  eq(rules.next("abilities", r, w, m), 1, "Backstab's turn, in its place above Disarm")
+  r[1], r[2] = r[2], r[1]
+  eq(rules.next("abilities", r, w, m), 1, "Disarm moved above them goes first")
+  r[1], r[2] = r[2], r[1]
+  -- One of them held back (off, a condition) leaves the turn to the other.
+  r[1].enabled = false
+  w = fake.world({ target = mob, haters = { mob }, ready = { ["skill:Backstab"] = true, ["skill:Bash"] = true },
+    now = w.now })
+  w.fighting = true
+  eq(rules.next("abilities", r, w, m), 3, "Bash alone")
+end)
+
+case("engine: a shared-timer row the game refuses still gives up its turn", function()
+  local engine = require('lib.engine')
+  local s = settings.repair({ abilities = {
+    { name = "Backstab", kind = "skill", target = "enemy" }, { name = "Bash", kind = "skill", target = "enemy" } } })
+  local e = engine.new()
+  local io = fake.io()
+  io.use = function(kind, name)
+    io.used[#io.used + 1] = kind .. ":" .. name
+    return name ~= "Backstab" -- no piercer
+  end
+  engine.start(e, io)
+  local mob = fake.spawn({ id = 9 })
+  local w = fake.world({ target = mob, haters = { mob }, ready = { ["skill:Backstab"] = true, ["skill:Bash"] = true } })
+  engine.tick(e, w, s, io)
+  w.now = w.now + 10000
+  engine.tick(e, w, s, io)
+  eq(io.used[1], "skill:Backstab", "tried first")
+  eq(io.used[2], "skill:Bash", "Bash next, although Backstab was refused")
+end)

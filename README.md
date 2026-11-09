@@ -54,6 +54,12 @@ fires. A row has:
 - **Conditions:** for example "Me Health % < 50", "Target Health % > 20", "Me lacks Spirit of Wolf",
   "Target is named", "Mobs on me within 30 of the target >= 3". Every condition must hold.
 
+**Skills that share a timer take turns.** Backstab, Bash, Slam, Kick, Round Kick, Flying Kick, Eagle Strike, Dragon
+Punch (Tail Rake), and Frenzy all run on one timer: using any of them makes them all wait (Tiger Claw has a timer of
+its own). Taking the first row that is ready would let the highest of them take every turn, so instead, rows for these
+skills take turns, in the place of the highest of them. To use one of them more often than another, give the other a
+recast.
+
 **Counting mobs, for AE spells and abilities.** Six conditions count mobs within a distance you set, of you (for a
 point-blank AE) or of the target (for a targeted AE); the distance is in three dimensions, as the server measures an
 AE's reach, and the spell's AE range is in its Info window:

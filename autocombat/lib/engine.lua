@@ -192,6 +192,7 @@ local function fire(e, list, i, row, to, world, io, s)
     if retarget or (item.cast_time or 0) > 0 then io.delay(1000, io.casting) end
   else
     ok = io.use(row.kind, row.name)
+    rules.tried(list, i, row, e.memory, world.now)
   end
   if retarget then
     if back and back ~= 0 then io.cmd('/target id ' .. back) else io.cmd('/target clear') end
