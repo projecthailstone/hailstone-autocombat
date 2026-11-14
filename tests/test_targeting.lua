@@ -46,6 +46,16 @@ case("targeting: someone's pet (a swarm pet too) is never chosen", function()
   corpse.owned = false
   check(targeting.allowed(corpse, t), "else allowed")
   local list = targeting.hunt_candidates({ { id = 5, name = "x", hp = 100, x = 10, y = 0, z = 0, level = 10, con = "white",
-    owned = true } }, t, settings.defaults().hunter, { 0, 0, 0 }, {}, false)
+    npc = true, owned = true } }, t, settings.defaults().hunter, { 0, 0, 0 }, {}, false)
   eq(#list, 0, "not a hunt candidate")
+end)
+
+case("targeting: hunter includes a living NPC at zero percent, but leaves out corpses", function()
+  local s = settings.defaults()
+  local living = fake.spawn({ id = 9, hp = 0, x = 10 })
+  local corpse = fake.spawn({ id = 10, hp = 100, x = 5, npc = false, dead = true })
+  local list = targeting.hunt_candidates({ corpse, living }, s.targeting, s.hunter, { 0, 0, 0 }, {}, false)
+  eq(#list, 1, "only the living NPC")
+  eq(list[1] and list[1].id, 9, "zero percent remains a candidate")
+  eq(living.hp, 0, "health is not clamped")
 end)

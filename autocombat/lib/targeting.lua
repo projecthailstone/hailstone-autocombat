@@ -1,5 +1,5 @@
 -- Auto Combat: which mob to fight. Pure: spawns are plain tables from the snapshot (lib/world.lua):
--- { id, name, hp, distance, level, named, con ("green", "lightblue" ...), mezzed, x, y, z, players_near }.
+-- { id, name, hp, npc, dead, distance, level, named, con ("green", "lightblue" ...), mezzed, x, y, z, players_near }.
 local M = {}
 
 local function lower(s) return (s or ""):lower() end
@@ -62,7 +62,7 @@ end
 function M.hunt_candidates(spawns, t, h, from, skip, camp_style, whole_zone)
   local out, filtered = {}, 0
   for _, s in ipairs(spawns) do
-    local wanted = (s.hp or 0) > 0 and M.allowed(s, t) and not (t.skip_near_players and s.players_near)
+    local wanted = s.npc and not s.dead and M.allowed(s, t) and not (t.skip_near_players and s.players_near)
     if not wanted then filtered = filtered + 1 end
     if wanted and not skip[s.id] then
       local d = flat({ s.x, s.y }, from)

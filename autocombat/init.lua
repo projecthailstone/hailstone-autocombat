@@ -120,11 +120,6 @@ end
 
 -- ---------------------------------------------------------------- the extended target list and the marks
 
-local function alive(id)
-  local sp = mq.TLO.Spawn('id ' .. id)
-  return sp() ~= nil and sp.Type() ~= "Corpse" and (tonumber(sp.PctHPs()) or 0) > 0
-end
-
 -- Each slot of the extended target list, in order ({ id = 0 } when empty), for the window's buttons; and the ids of
 -- its auto haters.
 local function xtargets()
@@ -388,7 +383,7 @@ while true do
   end
   local list, hater_ids = xtargets()
   xt_list = list
-  engine.update_marks(E, hater_ids, alive, act)
+  engine.update_marks(E, hater_ids, world_mod.alive, act)
   local w = E.running and world_mod.read(S, allowed()) or nil
   if E.burn and engine.burn_tick(E, w and #w.haters or world_mod.hater_count(), act) then
     say("burn over: the extended target list is clear.")

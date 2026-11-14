@@ -33,6 +33,7 @@ local function spawn_table(sp)
     id = sp.ID(),
     name = sp.CleanName() or sp.Name() or "?",
     hp = pct(sp.PctHPs()),
+    dead = sp.Dead() == true,
     distance = tonumber(sp.Distance()) or 9999,
     level = tonumber(sp.Level()) or 0,
     named = sp.Named() == true,
@@ -62,6 +63,12 @@ local function spawn_by_id(id)
   local sp = mq.TLO.Spawn('id ' .. id)
   if not sp() then return nil end
   return spawn_table(sp)
+end
+
+-- HP is a whole percentage: a living NPC can still report 0. Only death or a missing spawn ends its life.
+function M.alive(id)
+  local sp = mq.TLO.Spawn('id ' .. id)
+  return sp() ~= nil and sp.Type() == "NPC" and sp.Dead() ~= true
 end
 
 -- The player.
@@ -98,7 +105,7 @@ local function haters()
     local x = hs.xtarget(i)
     if x and x.type == 1 and (x.spawn_id or 0) ~= 0 then
       local s = spawn_by_id(x.spawn_id)
-      if s and s.hp > 0 then out[#out + 1] = s end
+      if s and s.npc and not s.dead then out[#out + 1] = s end
     end
   end
   return out
@@ -324,7 +331,7 @@ function M.read(settings, allowed)
     if not npcs then
       npcs = {}
       local list = mq.getFilteredSpawns(function(s)
-        return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and (tonumber(s.Distance3D()) or 9999) <= 400
+        return s.Type() == "NPC" and s.Dead() ~= true and (tonumber(s.Distance3D()) or 9999) <= 400
           and targetable(s) and not owned(s)
       end)
       for _, s in ipairs(list) do
@@ -344,7 +351,7 @@ function M.read(settings, allowed)
     end
     local out = {}
     local list = mq.getFilteredSpawns(function(s)
-      return s.Type() == "NPC" and (tonumber(s.PctHPs()) or 0) > 0 and targetable(s) and not owned(s)
+      return s.Type() == "NPC" and s.Dead() ~= true and targetable(s) and not owned(s)
     end)
     for _, s in ipairs(list) do
       local x = spawn_table(s)

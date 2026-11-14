@@ -1,5 +1,5 @@
--- The pure parts of Auto Combat, tested with plain Lua 5.4 (no client): lua5.4 tests/run.lua
--- lib/world.lua and init.lua read the game and are not covered here; tests/fake.lua stands in for the snapshot.
+-- Auto Combat, tested with plain Lua 5.4 (no client): lua5.4 tests/run.lua
+-- Pure logic uses tests/fake.lua; world adapter tests supply mocked mq and hailstone modules.
 local root = arg[0]:match("^(.*)/tests/run%.lua$") or "."
 package.path = root .. "/autocombat/?.lua;" .. root .. "/tests/?.lua;" .. package.path
 
@@ -28,7 +28,7 @@ function case(name, fn)
   end
 end
 
-for _, file in ipairs({ "test_settings", "test_conditions", "test_rules", "test_targeting", "test_engine" }) do
+for _, file in ipairs({ "test_settings", "test_conditions", "test_rules", "test_targeting", "test_engine", "test_world" }) do
   require(file)
 end
 

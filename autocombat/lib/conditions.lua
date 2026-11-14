@@ -5,7 +5,7 @@
 -- the numbers the catalog names (hp, mana, distance ...), booleans (named, mezzed, los ...) and for buffs
 -- has_buff(name) / my_buff(name) functions answering true, false, or nil when it cannot be known (a target whose
 -- buffs the server did not send). Counts read world.haters (the mobs on the player, with x, y, z) and world.npcs()
--- (the live NPCs about, not pets: { id, x, y, z, hp }).
+-- (the live NPCs about, not pets: { id, x, y, z }).
 local catalog = require('lib.catalog')
 
 local M = {}
@@ -14,7 +14,7 @@ local M = {}
 local function count_near(list, at, radius, skip)
   local n, r2 = 0, radius * radius
   for _, s in ipairs(list or {}) do
-    if (s.hp or 1) > 0 and not (skip and skip[s.id]) then
+    if not s.dead and not (skip and skip[s.id]) then
       local dx, dy, dz = (s.x or 0) - (at.x or 0), (s.y or 0) - (at.y or 0), (s.z or 0) - (at.z or 0)
       if dx * dx + dy * dy + dz * dz <= r2 then n = n + 1 end
     end
