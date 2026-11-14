@@ -385,3 +385,80 @@ case("engine: a worn click item on yourself mid-fight targets you and goes back;
   local seq = table.concat(io.lines, "|")
   check(seq:find("/attack off|/target id 1|/useitem 3|/target id 9|/attack on", 1, true) ~= nil, "sequence: " .. seq)
 end)
+
+case("engine: every fight mode keeps attacking at zero percent until the NPC becomes a corpse", function()
+  for _, mode in ipairs({ "full", "partial", "assist", "forced", "engage" }) do
+    local s, e, io = setup({ mode = mode == "engage" and "hunter" or mode == "assist" and "assist" or "manual",
+      style = mode == "partial" and "partial" or "full",
+      abilities = { { name = "Kick", kind = "skill", target = "enemy" } } })
+    local mob = fake.spawn({ id = 9, hp = 1 })
+    local next_mob = fake.spawn({ id = 10, distance = 100, x = 100 })
+    local assist = fake.spawn({ id = 2, npc = false, pc = true })
+    local haters = (mode == "full" or mode == "partial") and { mob } or {}
+    if mode == "forced" then engine.force(e, mob.id, mob.name, io) end
+    if mode == "engage" then e.engage_id = mob.id end
+    local function snapshot(now)
+      return fake.world({ now = now, target = mob, haters = haters, assist = assist,
+        me = { combat = now > 100000 }, ready = { ["skill:Kick"] = true },
+        hunt = { next_mob }, spawns = { mob, next_mob }, paths = { [10] = 100 } })
+    end
+    engine.tick(e, snapshot(100000), s, io)
+    eq(e.fight_id, 9, mode .. ": began fighting")
+    check(io.has("/attack on"), mode .. ": attack started")
+    mob.hp = 0
+    io.clear()
+    engine.tick(e, snapshot(105000), s, io)
+    eq(e.fight_id, 9, mode .. ": retained the zero-percent target")
+    eq(io.used[1], "skill:Kick", mode .. ": ability still fires")
+    check(not io.has("/attack off") and not io.has("/stick off"), mode .. ": combat continues")
+    check(not io.has("/target id 10") and not io.has("/nav id 10 distance=10"), mode .. ": no next mob")
+    check(e.hunt == nil, mode .. ": no new hunt")
+    mob.npc, mob.dead, mob.hp = false, true, 100 -- death is independent of the last health update
+    haters = {}
+    io.clear()
+    engine.tick(e, snapshot(110000), s, io)
+    eq(e.fight_id, 0, mode .. ": corpse ends the fight")
+    eq(#io.used, 0, mode .. ": no ability against a corpse")
+    check(io.has("/attack off"), mode .. ": stops attacking after death")
+    if mode == "engage" then eq(e.hunt and e.hunt.id, 10, "hunter chooses the next mob after death") end
+  end
+end)
+
+case("engine: assist can acquire a target already at zero percent and keeps it when the assist changes targets", function()
+  local s, e, io = setup({ mode = "assist", abilities = { { name = "Kick", kind = "skill", target = "enemy" } } })
+  local mob = fake.spawn({ id = 9, hp = 0 })
+  local other = fake.spawn({ id = 10 })
+  local assist = fake.spawn({ id = 2, npc = false, pc = true })
+  engine.tick(e, fake.world({ target = mob, assist = assist, ready = { ["skill:Kick"] = true } }), s, io)
+  eq(e.fight_id, 9, "acquires the living target at zero percent")
+  check(io.has("/attack on"), "starts attacking")
+  eq(io.used[1], "skill:Kick", "uses its ability")
+  io.clear()
+  engine.tick(e, fake.world({ now = 105000, target = other, assist = assist, spawns = { mob } }), s, io)
+  eq(e.fight_id, 9, "keeps the original living target")
+  check(io.has("/target id 9"), "retargets it instead of following the assist's new target")
+  io.clear()
+  engine.tick(e, fake.world({ now = 110000, me = { combat = true } }), s, io)
+  eq(e.fight_id, 0, "despawn ends the fight")
+  check(io.has("/attack off"), "despawn stops attacking")
+end)
+
+case("engine: a pending hunt survives zero percent and is replaced after despawn", function()
+  local s, e, io = setup({ mode = "hunter" })
+  local mob = fake.spawn({ id = 9, hp = 1, x = 100, distance = 100 })
+  local other = fake.spawn({ id = 10, x = 200, distance = 200 })
+  local w = fake.world({ hunt = { mob, other }, spawns = { mob, other }, paths = { [9] = 100, [10] = 200 } })
+  engine.tick(e, w, s, io)
+  eq(e.hunt and e.hunt.id, 9, "chooses the first mob")
+  mob.hp = 0
+  io.clear()
+  engine.tick(e, w, s, io)
+  eq(e.hunt and e.hunt.id, 9, "keeps the pending hunt at zero percent")
+  check(io.has("/nav id 9 distance=10"), "continues walking to it")
+  io.clear()
+  local gone = fake.world({ now = 105000, hunt = { other }, spawns = { other }, paths = { [10] = 200 } })
+  engine.tick(e, gone, s, io)
+  eq(e.hunt and e.hunt.id, 10, "chooses a replacement after despawn")
+  engine.tick(e, gone, s, io)
+  check(io.has("/nav id 10 distance=10"), "walks to the replacement")
+end)

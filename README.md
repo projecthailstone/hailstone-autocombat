@@ -150,6 +150,9 @@ among them (an animated corpse, a necromancer's skeletons ...). Stock EQEmu send
 is told by its surname, "<owner>'s Pet" (the server's rule `Pets:ClientPetsUseOwnerNameInLastName`, on by default),
 or a name that starts with a player's in the zone, as "<owner>`s Animated Corpse".
 
+A mob displaying 0% health can still be alive. Auto Combat keeps fighting it until it becomes a corpse or leaves
+the zone's spawn list; Hunter then chooses another mob. Health conditions still use the displayed percentage.
+
 Pausing stops what Auto Combat started: its walking or sticking, the auto attack it turned on, and the pet it sent
 (`/pet back off`).
 
@@ -191,11 +194,11 @@ MIT (see `LICENSE`).
 
 ## Development
 
-The pure parts (settings, conditions, row choice, targeting and the mode logic) are tested with plain Lua 5.4:
+The pure parts (settings, conditions, row choice, targeting and the mode logic), and the world snapshot with mock
+client APIs, are tested with plain Lua 5.4:
 
 ```sh
 lua5.4 tests/run.lua
 ```
 
-`autocombat/lib/world.lua` (which reads the game) and `autocombat/init.lua` are not covered by these tests. Try
-them in the client.
+`autocombat/init.lua` and live client integration are not covered by these tests. Try them in the client.

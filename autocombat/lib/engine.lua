@@ -233,6 +233,10 @@ local function hater_ids(world)
   return ids
 end
 
+local function alive(spawn)
+  return spawn and spawn.npc and not spawn.dead
+end
+
 -- The mob to fight now, or nil. Full and Hunter fight only what is on the extended target list (the mobs on me) and
 -- the one Hunter chose to go after; never a target that is merely selected with auto attack on (an animated corpse,
 -- someone's pet), and never someone's pet (lib/world.lua's owned).
@@ -240,13 +244,13 @@ local function fight_target(e, world, s)
   -- The forced mob first, in every mode, while it lives.
   if e.force_id ~= 0 then
     local f = world.spawn(e.force_id)
-    if f and (f.hp or 0) > 0 and not f.owned then return f end
+    if alive(f) and not f.owned then return f end
   end
   local ignored = e.ignore
   local haters = hater_ids(world)
   local pt = world.target
   if pt and ignored[pt.id] then pt = nil end
-  local player_fights = pt and pt.npc and not pt.owned and (pt.hp or 0) > 0 and (haters[pt.id] or world.me.combat)
+  local player_fights = alive(pt) and not pt.owned and (haters[pt.id] or world.me.combat)
   if s.mode == "manual" and s.style == "partial" then
     -- You choose: the NPC you target, once it is on you or you attack it.
     return player_fights and pt or nil
@@ -256,9 +260,9 @@ local function fight_target(e, world, s)
     -- Keep at the one we fight while it lives; else the assist's target (our target after /assist) once low enough.
     if e.fight_id ~= 0 and not ignored[e.fight_id] then
       local f = world.spawn(e.fight_id)
-      if f and (f.hp or 0) > 0 then return f end
+      if alive(f) then return f end
     end
-    if a and pt and pt.npc and not pt.owned and (pt.hp or 0) > 0 and pt.id ~= a.id
+    if a and alive(pt) and not pt.owned and pt.id ~= a.id
         and (pt.hp or 100) <= s.assist.engage_pct then
       return pt
     end
@@ -267,13 +271,13 @@ local function fight_target(e, world, s)
   -- Full and hunter: the mobs on me, then the one Hunter chose to go after.
   local awake = {}
   for _, x in ipairs(world.haters) do
-    if not x.owned and not ignored[x.id] then awake[#awake + 1] = x end
+    if alive(x) and not x.owned and not ignored[x.id] then awake[#awake + 1] = x end
   end
   local h = targeting.choose_hater(awake, e.fight_id, s.targeting.priority)
   if h then return h end
   if e.engage_id ~= 0 and not ignored[e.engage_id] then
     local g = world.spawn(e.engage_id)
-    if g and (g.hp or 0) > 0 and not g.owned then return g end
+    if alive(g) and not g.owned then return g end
     e.engage_id = 0
   end
   return nil
@@ -331,7 +335,7 @@ end
 local function fight_over(e, world, s, io)
   if e.fight_id == 0 then return end
   local f = world.spawn(e.fight_id)
-  note(e, (f and f.name or "The mob") .. ((f and (f.hp or 0) > 0) and " is no longer fought" or " is dead"), io)
+  note(e, (f and f.name or "The mob") .. (alive(f) and " is no longer fought" or " is dead"), io)
   e.fight_id = 0
   if e.stick_id ~= 0 then
     io.cmd('/stick off')
@@ -408,8 +412,9 @@ local function hunt(e, world, s, io)
   -- Walking to one: give up after a while; in reach, pull it (camp) or engage it (roam).
   if e.hunt then
     local m = world.spawn(e.hunt.id)
-    if not m or (m.hp or 0) <= 0 then
+    if not alive(m) then
       e.hunt = nil
+      if e.nav then io.cmd('/nav stop') e.nav = nil end
     elseif world.now - e.hunt.since > h.give_up * 1000 then
       e.skip[e.hunt.id] = world.now + SKIP_MS
       note(e, "Gave up on " .. (m.name or "?"), io)

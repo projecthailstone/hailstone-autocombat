@@ -49,9 +49,15 @@ case("conditions: mobs counted within a radius of me or the target", function()
   check(n("me", "near_idle", "<=", 0, 30), "nothing else near me")
   check(n("me", "near_haters", ">=", 3, 120), "all three within 120")
   check(n("me", "near_npcs", "=", 4, 120), "the one above the target is not")
-  -- A dead mob does not count; the radius falls back to the catalog's.
+  -- A living mob at 0% still counts, and its health conditions keep the actual percentage.
   a.hp = 0
+  check(n("target", "near_haters", "=", 2, 20), "the living zero-percent target counts")
+  check(n("target", "near_npcs", "=", 3, 20), "the zero-percent NPC counts nearby")
+  check(n("target", "hp", "<=", 0), "the target's HP is still zero")
+  -- A dead mob does not count even with stale positive HP; the radius falls back to the catalog's.
+  a.dead, a.hp = true, 80
   check(n("target", "near_haters", "=", 1, 20), "the dead target left out")
+  check(n("target", "near_npcs", "=", 2, 20), "the corpse is not an NPC nearby")
   check(conditions.holds({ who = "me", what = "near_haters", op = "=", value = 1 }, w), "default radius 30: the one at 10")
   -- No target, or no NPC list: it never holds.
   local blind = fake.world({ haters = { c } })
